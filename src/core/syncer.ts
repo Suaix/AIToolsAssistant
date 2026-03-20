@@ -161,3 +161,135 @@ export async function syncAllSkills(
     results,
   };
 }
+
+/**
+ * 目标工具名称到项目级子目录的映射
+ * 项目级 Skill 存储在项目根目录下的对应工具目录中
+ */
+export const PROJECT_TARGET_PATHS: Record<string, string> = {
+  codebuddy: '.codebuddy/skills',
+  'claude-code': '.claude/skills',
+};
+
+/**
+ * 将单个 Skill 同步到项目级单个目标
+ * @param skill Skill 元数据
+ * @param targetName 目标工具名称
+ * @param projectDir 项目根目录的绝对路径
+ * @returns 同步结果（动作类型：created / updated / skipped）
+ */
+async function syncSkillToProjectTarget(
+  skill: SkillInfo,
+  targetName: string,
+  projectDir: string,
+): Promise<SkillTargetSyncResult> {
+  const relativePath = PROJECT_TARGET_PATHS[targetName];
+  if (!relativePath) {
+    /* 该工具没有项目级路径映射，跳过 */
+    return { targetName, action: 'skipped' };
+  }
+
+  const targetBaseDir = path.join(projectDir, relativePath);
+  const targetSkillDir = path.join(targetBaseDir, skill.dirName);
+
+  /* 计算源目录的 hash */
+  const sourceHash = await hashDirectory(skill.path);
+
+  /* 计算目标目录的 hash（不存在时为 null） */
+  const targetHash = await hashDirectorySafe(targetSkillDir);
+
+  /* 判断是否需要同步 */
+  if (targetHash !== null && sourceHash === targetHash) {
+    return { targetName, action: 'skipped' };
+  }
+
+  /* 确保目标基础目录存在 */
+  await fs.mkdir(targetBaseDir, { recursive: true });
+
+  /* 执行全量拷贝 */
+  await copyDirectory(skill.path, targetSkillDir);
+
+  /* 判断是新增还是更新 */
+  const action = targetHash === null ? 'created' : 'updated';
+  return { targetName, action };
+}
+
+/**
+ * 执行项目级同步操作
+ * 将指定的 Skills 同步到项目目录下各已启用目标的项目级路径
+ * @param skills 要同步的 Skill 列表（已过滤，仅包含项目关联的 Skills）
+ * @param config 全局配置对象
+ * @param projectDir 项目根目录的绝对路径
+ * @param targetFilter 可选，指定单个目标名称进行过滤
+ * @returns 同步结果摘要
+ */
+export async function syncProjectSkills(
+  skills: SkillInfo[],
+  config: Config,
+  projectDir: string,
+  targetFilter?: string,
+): Promise<SyncSummary> {
+  /* 筛选已启用且有项目级路径映射的目标 */
+  let targets = config.targets.filter(
+    (t) => t.enabled && PROJECT_TARGET_PATHS[t.name],
+  );
+
+  /* 如果指定了目标过滤器，进一步筛选 */
+  if (targetFilter) {
+    targets = targets.filter((t) => t.name === targetFilter);
+    if (targets.length === 0) {
+      logger.error(`未找到目标工具: ${targetFilter}`);
+      return {
+        totalSkills: skills.length,
+        created: 0,
+        updated: 0,
+        skipped: 0,
+        results: [],
+      };
+    }
+  }
+
+  const results: SkillSyncResult[] = [];
+  let created = 0;
+  let updated = 0;
+  let skipped = 0;
+
+  /* 遍历每个 Skill，同步到每个目标的项目级目录 */
+  for (const skill of skills) {
+    const targetResults: SkillTargetSyncResult[] = [];
+
+    for (const target of targets) {
+      try {
+        const result = await syncSkillToProjectTarget(skill, target.name, projectDir);
+        targetResults.push(result);
+
+        /* 统计计数 */
+        if (result.action === 'created') {
+          created++;
+        } else if (result.action === 'updated') {
+          updated++;
+        } else {
+          skipped++;
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        logger.error(`项目级同步 ${skill.dirName} → ${target.name} 失败: ${message}`);
+        targetResults.push({ targetName: target.name, action: 'skipped' });
+        skipped++;
+      }
+    }
+
+    results.push({
+      skillName: skill.dirName,
+      targetResults,
+    });
+  }
+
+  return {
+    totalSkills: skills.length,
+    created,
+    updated,
+    skipped,
+    results,
+  };
+}

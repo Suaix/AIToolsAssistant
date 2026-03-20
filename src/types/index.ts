@@ -114,3 +114,13 @@ export interface SkillListItem {
     status: SkillSyncStatus;
   }[];
 }
+
+/**
+ * 项目级配置文件结构
+ * 对应 .aitools/project.yaml
+ * 记录当前项目已关联的 Skill 名称列表
+ */
+export interface ProjectConfig {
+  /** 已关联的 Skill 名称列表（对应源目录中的文件夹名） */
+  skills: string[];
+}

@@ -5,3 +5,4 @@ coverage/
 pnpm-debug.log*
 CODEBUDDY.md
 .codebuddy
+.aitools

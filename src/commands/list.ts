@@ -1,11 +1,13 @@
 /**
  * list 命令处理模块
- * 列出源目录中所有 Skills 并展示同步状态
+ * 列出源目录中所有 Skills 并展示同步状态（用户级 + 项目级两段式）
  */
 import fs from 'node:fs/promises';
 import { loadConfig, expandTilde } from '../config/manager.js';
 import { scanSkills } from '../core/scanner.js';
 import { hashDirectory, hashDirectorySafe } from '../core/hasher.js';
+import { PROJECT_TARGET_PATHS } from '../core/syncer.js';
+import { loadProjectConfig } from '../config/project.js';
 import { logger } from '../utils/logger.js';
 import type { SkillInfo, SkillSyncStatus, Target } from '../types/index.js';
 import path from 'node:path';
@@ -192,8 +194,38 @@ function getTargetDisplayName(targetName: string): string {
 }
 
 /**
+ * 获取单个 Skill 在项目级单个目标中的同步状态
+ * @param sourceHash 源目录预计算的 hash 值
+ * @param skillDirName Skill 文件夹名
+ * @param targetName 目标工具名称
+ * @param projectDir 项目根目录的绝对路径
+ * @returns 同步状态码
+ */
+async function getProjectSkillTargetStatus(
+  sourceHash: string,
+  skillDirName: string,
+  targetName: string,
+  projectDir: string,
+): Promise<SkillSyncStatus> {
+  const relativePath = PROJECT_TARGET_PATHS[targetName];
+  if (!relativePath) {
+    return 'not_synced';
+  }
+
+  const targetSkillDir = path.join(projectDir, relativePath, skillDirName);
+  const targetHash = await hashDirectorySafe(targetSkillDir);
+
+  if (targetHash === null) {
+    return 'not_synced';
+  }
+
+  return sourceHash === targetHash ? 'synced' : 'changed';
+}
+
+/**
  * list 命令处理函数
  * 扫描源目录 Skills 并以表格形式展示各目标的同步状态
+ * 自动检测项目级配置，如有则额外展示项目级同步状态（两段式布局）
  */
 export async function listCommand(): Promise<void> {
   /* 读取配置文件 */
@@ -229,7 +261,7 @@ export async function listCommand(): Promise<void> {
   /* 筛选已启用的目标 */
   const enabledTargets = config.targets.filter((t) => t.enabled);
 
-  /* 输出标题 */
+  /* ==================== 用户级表格 ==================== */
   console.log('');
   logger.info(`📋 用户级 Skills (源: ${config.source})`);
   console.log('');
@@ -241,8 +273,11 @@ export async function listCommand(): Promise<void> {
     ...enabledTargets.map((t) => getTargetDisplayName(t.name)),
   ];
 
-  /* 是否存在未同步的 Skill */
+  /* 是否存在未同步的 Skill（用于底部提示） */
   let hasUnsyncedSkill = false;
+
+  /* 预计算所有 Skill 的源 hash（后续项目级复用） */
+  const skillHashMap = new Map<string, string>();
 
   /* 采集每个 Skill 的数据行 */
   const rows: string[][] = [];
@@ -250,6 +285,7 @@ export async function listCommand(): Promise<void> {
   for (const skill of skills) {
     /* 计算源目录 hash（每个 Skill 只计算一次） */
     const sourceHash = await hashDirectory(skill.path);
+    skillHashMap.set(skill.dirName, sourceHash);
     /* 截取前 8 位作为短 hash */
     const shortHash = sourceHash.slice(0, 8);
 
@@ -273,10 +309,78 @@ export async function listCommand(): Promise<void> {
     rows.push([truncateName(skill.name), shortHash, ...statusCells]);
   }
 
-  /* 渲染并输出表格 */
+  /* 渲染并输出用户级表格 */
   console.log(formatTable(headers, rows));
 
-  /* 底部操作提示 */
+  /* ==================== 项目级表格（自动检测） ==================== */
+  const projectDir = process.cwd();
+  const projectConfig = await loadProjectConfig(projectDir);
+
+  /* 仅当项目配置存在且有关联 Skills 时才显示 */
+  if (projectConfig && projectConfig.skills.length > 0) {
+    /* 筛选有项目级路径映射的目标 */
+    const projectTargets = enabledTargets.filter(
+      (t) => PROJECT_TARGET_PATHS[t.name],
+    );
+
+    if (projectTargets.length > 0) {
+      console.log('');
+      logger.info(`📁 项目级 Skills (项目: ${projectDir})`);
+      console.log('');
+
+      /* 项目级表头 */
+      const projectHeaders = [
+        'Skill 名称',
+        '源 hash',
+        ...projectTargets.map((t) => getTargetDisplayName(t.name)),
+      ];
+
+      const projectRows: string[][] = [];
+
+      for (const skillName of projectConfig.skills) {
+        const skill = skills.find((s) => s.dirName === skillName);
+
+        if (!skill) {
+          /* 源目录中不存在该 Skill，标注 (源已删除) */
+          const displayName = truncateName(`${skillName} (源已删除)`);
+          const dashCells = projectTargets.map(() => '-');
+          projectRows.push([displayName, '-', ...dashCells]);
+          continue;
+        }
+
+        /* 复用已计算的源 hash */
+        const sourceHash = skillHashMap.get(skillName) ?? await hashDirectory(skill.path);
+        const shortHash = sourceHash.slice(0, 8);
+
+        const statusCells: string[] = [];
+
+        for (const target of projectTargets) {
+          try {
+            const status = await getProjectSkillTargetStatus(
+              sourceHash,
+              skillName,
+              target.name,
+              projectDir,
+            );
+            statusCells.push(formatStatus(status));
+            if (status !== 'synced') {
+              hasUnsyncedSkill = true;
+            }
+          } catch {
+            statusCells.push(formatStatus('not_synced'));
+            hasUnsyncedSkill = true;
+          }
+        }
+
+        projectRows.push([truncateName(skill.name), shortHash, ...statusCells]);
+      }
+
+      /* 渲染并输出项目级表格 */
+      console.log(formatTable(projectHeaders, projectRows));
+    }
+  }
+
+  /* ==================== 底部综合提示 ==================== */
   console.log('');
   if (hasUnsyncedSkill) {
     logger.info('💡 运行 aitools sync 同步最新变更');

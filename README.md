@@ -4,14 +4,14 @@
 
 ## 简介
 
-`aitools-cli` 是一个命令行工具，用于将你的 Skills（技能）文件统一管理，并同步到不同的 AI 编程助手的用户级目录中。
+`aitools-cli` 是一个命令行工具，用于将你的 Skills（技能）文件统一管理，并同步到不同的 AI 编程助手的**用户级**和**项目级**目录中。
 
 目前支持的 AI 工具：
 
-| 工具 | 用户级 Skills 目录 |
-|---|---|
-| **CodeBuddy** | `~/.codebuddy/skills/<name>/` |
-| **Claude Code** | `~/.claude/skills/<name>/` |
+| 工具 | 用户级 Skills 目录 | 项目级 Skills 目录 |
+|---|---|---|
+| **CodeBuddy** | `~/.codebuddy/skills/<name>/` | `<project>/.codebuddy/skills/<name>/` |
+| **Claude Code** | `~/.claude/skills/<name>/` | `<project>/.claude/skills/<name>/` |
 
 ### 核心特性
 
@@ -19,6 +19,7 @@
 - 🔄 **智能同步** — 基于 SHA-256 hash 对比，仅同步有变更的文件
 - 📦 **全量拷贝** — 每个 Skill 整个文件夹完整同步（包括模板、示例、脚本等）
 - 🎨 **交互式配置** — 引导式初始化，操作简单直观
+- 📁 **项目级管理** — 支持将 Skill 关联到特定项目，按项目维度独立管理同步
 
 ## 环境要求
 
@@ -124,24 +125,56 @@ description: 提供全面的代码审查指导和最佳实践
 
 ### 3. 同步 — `aitools sync`
 
-将源目录中的 Skills 同步到所有已启用的 AI 工具目录：
+将源目录中的 Skills 同步到所有已启用的 AI 工具目录。支持**用户级**和**项目级**两种同步范围。
+
+#### 基本用法（用户级同步）
 
 ```bash
-# 同步到所有目标
+# 同步到所有目标的用户级目录
 aitools sync
 
 # 仅同步到指定目标
 aitools sync --target claude-code
 aitools sync -t codebuddy
+
+# 显式指定仅用户级同步
+aitools sync --scope user
 ```
 
-同步机制：
+#### 项目级同步
+
+项目级同步会将指定的 Skills 同步到**当前项目目录**下的 AI 工具子目录（如 `.codebuddy/skills/`、`.claude/skills/`），让不同项目可以拥有不同的 Skill 配置。
+
+```bash
+# 将指定 Skill 关联到当前项目并同步
+aitools sync --skill code-review
+
+# 仅同步当前项目已关联的 Skills
+aitools sync --scope project
+```
+
+**项目配置文件**：执行 `--skill` 后会在当前项目创建 `.aitools/project.yaml`，记录已关联的 Skill 列表：
+
+```yaml
+skills:
+  - code-review
+  - git-workflow
+```
+
+#### 智能检测模式
+
+裸执行 `aitools sync`（不带 `--scope` 参数）时，工具会**自动检测**当前目录是否存在项目配置：
+
+- 如果有 `.aitools/project.yaml` → 先同步用户级，再自动同步项目级
+- 如果没有 → 仅同步用户级（与之前行为一致）
+
+#### 同步机制
 
 - 通过 SHA-256 hash 对比文件内容，**仅在有变更时才拷贝**
 - 每次同步是**全量替换**整个 Skill 文件夹（先清空再拷贝）
 - 目标目录不存在时自动创建
 
-输出示例：
+#### 输出示例
 
 ```
 🔄 正在同步用户级 Skills...
@@ -151,30 +184,57 @@ aitools sync -t codebuddy
    ✅ git-workflow → codebuddy, claude-code (更新)
    ⏭️  refactoring → codebuddy, claude-code (无变更)
 
-📊 同步完成: 3 个 Skills，新增 1 个，更新 1 个，跳过 1 个
+📊 用户级同步完成: 3 个 Skills，新增 1 个，更新 1 个，跳过 1 个
+
+🔄 正在同步项目级 Skills...
+   项目: /path/to/my-project (2 个 Skills)
+
+   ✅ code-review → codebuddy, claude-code (新增)
+   ⏭️  git-workflow → codebuddy, claude-code (无变更)
+
+📊 项目级同步完成: 2 个 Skills，新增 1 个，跳过 1 个
 ```
+
+#### 命令参数一览
+
+| 参数 | 说明 |
+|---|---|
+| `-t, --target <name>` | 指定单个同步目标工具（如 `codebuddy`、`claude-code`） |
+| `-s, --skill <name>` | 指定 Skill 名称，添加到当前项目并同步 |
+| `--scope <scope>` | 同步范围：`user`（仅用户级）、`project`（仅项目级） |
 
 ### 4. 查看列表 — `aitools list`
 
-列出所有 Skills 及其同步状态：
+列出所有 Skills 及其同步状态。如果当前目录存在项目配置（`.aitools/project.yaml`），会额外展示项目级同步状态。
 
 ```bash
 aitools list
 ```
 
-输出示例：
+输出示例（用户级 + 项目级两段式）：
 
 ```
 📋 用户级 Skills (源: ~/my-skills)
 
-   名称              描述                      同步状态
-   ──────────────────────────────────────────────────
-   code-review       代码审查助手              ✅ 已同步
-   git-workflow      Git 工作流                ⚠️  有变更
-   refactoring       -                         ❌ 未同步
+   名称              描述                 CodeBuddy    Claude Code
+   ────────────────────────────────────────────────────────────────
+   code-review       代码审查助手         ✅ 已同步     ✅ 已同步
+   git-workflow      Git 工作流           ⚠️  有变更    ✅ 已同步
+   refactoring       -                    ❌ 未同步     ❌ 未同步
+
+📁 项目级 Skills (项目: /path/to/my-project)
+
+   名称              描述                 CodeBuddy    Claude Code
+   ────────────────────────────────────────────────────────────────
+   code-review       代码审查助手         ✅ 已同步     ✅ 已同步
+   git-workflow      Git 工作流           ⚠️  有变更    ⚠️  有变更
 
 💡 运行 aitools sync 同步最新变更
 ```
+
+> **注**：当前目录没有 `.aitools/project.yaml` 时，仅展示用户级表格，输出与之前完全一致。
+>
+> 如果项目关联的某个 Skill 在源目录中已被删除，名称后会追加 `(源已删除)` 标记。
 
 状态说明：
 
@@ -213,18 +273,25 @@ src/
 ├── index.ts              # CLI 入口，注册 init / sync / list 命令
 ├── commands/
 │   ├── init.ts           # 交互式全局初始化
-│   ├── sync.ts           # 用户级 Skills 同步
-│   └── list.ts           # Skills 列表展示
+│   ├── sync.ts           # 用户级 + 项目级 Skills 同步
+│   └── list.ts           # Skills 列表展示（两段式：用户级 + 项目级）
 ├── core/
 │   ├── hasher.ts         # SHA-256 hash 计算
 │   ├── scanner.ts        # Skill 目录扫描 + frontmatter 解析
-│   └── syncer.ts         # 基于 hash 对比的同步引擎
+│   └── syncer.ts         # 基于 hash 对比的同步引擎（用户级 + 项目级）
 ├── config/
-│   └── manager.ts        # 配置文件管理（~/.aitools/config.yaml）
+│   ├── manager.ts        # 全局配置文件管理（~/.aitools/config.yaml）
+│   └── project.ts        # 项目配置文件管理（.aitools/project.yaml）
 ├── types/
 │   └── index.ts          # TypeScript 类型定义
 └── utils/
     └── logger.ts         # 终端日志工具
+
+tests/
+├── config/
+│   └── project.test.ts   # 项目配置模块测试
+└── core/
+    └── syncer.test.ts    # 同步引擎测试
 ```
 
 ## 技术栈

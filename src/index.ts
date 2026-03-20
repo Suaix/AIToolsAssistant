@@ -27,8 +27,10 @@ program
 /** 注册 sync 同步命令 */
 program
   .command('sync')
-  .description('将源目录中的 Skills 同步到各 AI 工具的用户级目录')
+  .description('将源目录中的 Skills 同步到各 AI 工具目录（用户级/项目级）')
   .option('-t, --target <name>', '指定单个同步目标工具（如 codebuddy、claude-code）')
+  .option('-s, --skill <name>', '指定 Skill 名称，添加到当前项目并同步')
+  .option('--scope <scope>', '同步范围: user（仅用户级）| project（仅项目级）')
   .action(syncCommand);
 
 /** 注册 list 列表命令 */
