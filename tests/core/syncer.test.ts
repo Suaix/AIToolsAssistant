@@ -51,6 +51,9 @@ beforeEach(async () => {
   await fs.mkdir(sourceDir, { recursive: true });
   await fs.mkdir(userTargetDir, { recursive: true });
   await fs.mkdir(projectDir, { recursive: true });
+  /* 为项目目录创建工具根目录，确保 detectProjectTools() 能检测到 */
+  await fs.mkdir(path.join(projectDir, '.codebuddy'), { recursive: true });
+  await fs.mkdir(path.join(projectDir, '.claude'), { recursive: true });
 });
 
 afterEach(async () => {
@@ -215,5 +218,32 @@ describe('syncProjectSkills（项目级同步）', () => {
 
     expect(summary.totalSkills).toBe(2);
     expect(summary.created).toBe(4); /* 2 Skills × 2 目标 */
+  });
+
+  it('仅存在一个工具目录时，应只同步到该工具', async () => {
+    /* 创建只有 .codebuddy 的项目目录 */
+    const singleToolProjectDir = path.join(tempDir, 'single-tool-project');
+    await fs.mkdir(singleToolProjectDir, { recursive: true });
+    await fs.mkdir(path.join(singleToolProjectDir, '.codebuddy'), { recursive: true });
+    /* 注意：不创建 .claude 目录 */
+
+    const skill = await createMockSkill(sourceDir, 'skill-d', '# Skill D');
+    const config = createTestConfig();
+
+    const summary = await syncProjectSkills([skill], config, singleToolProjectDir);
+
+    /* 应该只同步到 codebuddy（1 个目标），不同步到 claude-code */
+    expect(summary.created).toBe(1);
+    expect(summary.results[0].targetResults).toHaveLength(1);
+    expect(summary.results[0].targetResults[0].targetName).toBe('codebuddy');
+
+    /* 验证 .claude/skills/skill-d 不应存在 */
+    const claudeSkillDir = path.join(singleToolProjectDir, '.claude/skills/skill-d');
+    await expect(fs.access(claudeSkillDir)).rejects.toThrow();
+
+    /* 验证 .codebuddy/skills/skill-d 应存在 */
+    const codebuddySkillDir = path.join(singleToolProjectDir, '.codebuddy/skills/skill-d');
+    const stat = await fs.stat(codebuddySkillDir);
+    expect(stat.isDirectory()).toBe(true);
   });
 });

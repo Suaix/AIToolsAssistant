@@ -3,7 +3,9 @@
  * 基于 hash 对比的文件夹全量拷贝同步
  */
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import path from 'node:path';
+import { checkbox } from '@inquirer/prompts';
 import { hashDirectory, hashDirectorySafe } from './hasher.js';
 import { expandTilde } from '../config/manager.js';
 import { logger } from '../utils/logger.js';
@@ -172,6 +174,36 @@ export const PROJECT_TARGET_PATHS: Record<string, string> = {
 };
 
 /**
+ * 目标工具名称到工具根目录名的映射
+ * 用于检测当前项目使用的 AI 工具（检测根目录而非 skills 子目录）
+ */
+export const PROJECT_TOOL_DIRS: Record<string, string> = {
+  codebuddy: '.codebuddy',
+  'claude-code': '.claude',
+};
+
+/**
+ * 检测项目目录中实际存在的 AI 工具
+ * 通过判断项目根目录下是否存在对应的工具目录（如 .codebuddy/、.claude/）来确定
+ * @param projectDir 项目根目录的绝对路径
+ * @param targets 已启用且有项目级路径映射的目标列表
+ * @returns 检测到的目标列表（仅包含存在工具目录的目标）
+ */
+export function detectProjectTools(
+  projectDir: string,
+  targets: Target[],
+): Target[] {
+  return targets.filter((t) => {
+    const toolDir = PROJECT_TOOL_DIRS[t.name];
+    if (!toolDir) {
+      return false;
+    }
+    const toolDirPath = path.join(projectDir, toolDir);
+    return fsSync.existsSync(toolDirPath);
+  });
+}
+
+/**
  * 将单个 Skill 同步到项目级单个目标
  * @param skill Skill 元数据
  * @param targetName 目标工具名称
@@ -234,7 +266,7 @@ export async function syncProjectSkills(
     (t) => t.enabled && PROJECT_TARGET_PATHS[t.name],
   );
 
-  /* 如果指定了目标过滤器，进一步筛选 */
+  /* 如果指定了目标过滤器，进一步筛选（--target 优先级高于检测逻辑） */
   if (targetFilter) {
     targets = targets.filter((t) => t.name === targetFilter);
     if (targets.length === 0) {
@@ -246,6 +278,40 @@ export async function syncProjectSkills(
         skipped: 0,
         results: [],
       };
+    }
+  } else {
+    /* 未指定 --target 时，检测当前项目实际使用的 AI 工具 */
+    const detectedTargets = detectProjectTools(projectDir, targets);
+
+    if (detectedTargets.length > 0) {
+      /* 仅同步到检测到的工具 */
+      targets = detectedTargets;
+    } else {
+      /* 都不存在，交互式选择 */
+      logger.info('当前项目目录未检测到已知的 AI 工具目录');
+
+      const choices = targets.map((t) => ({
+        name: t.name,
+        value: t.name,
+      }));
+
+      const selected = await checkbox<string>({
+        message: '请选择要同步到的目标工具：',
+        choices,
+      });
+
+      if (selected.length === 0) {
+        logger.warn('未选择任何目标工具，取消同步');
+        return {
+          totalSkills: skills.length,
+          created: 0,
+          updated: 0,
+          skipped: 0,
+          results: [],
+        };
+      }
+
+      targets = targets.filter((t) => selected.includes(t.name));
     }
   }
 

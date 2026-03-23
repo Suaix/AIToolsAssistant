@@ -6,7 +6,7 @@ import fs from 'node:fs/promises';
 import { loadConfig, expandTilde } from '../config/manager.js';
 import { scanSkills } from '../core/scanner.js';
 import { hashDirectory, hashDirectorySafe } from '../core/hasher.js';
-import { PROJECT_TARGET_PATHS } from '../core/syncer.js';
+import { PROJECT_TARGET_PATHS, detectProjectTools } from '../core/syncer.js';
 import { loadProjectConfig } from '../config/project.js';
 import { logger } from '../utils/logger.js';
 import type { SkillInfo, SkillSyncStatus, Target } from '../types/index.js';
@@ -319,9 +319,15 @@ export async function listCommand(): Promise<void> {
   /* 仅当项目配置存在且有关联 Skills 时才显示 */
   if (projectConfig && projectConfig.skills.length > 0) {
     /* 筛选有项目级路径映射的目标 */
-    const projectTargets = enabledTargets.filter(
+    const mappedTargets = enabledTargets.filter(
       (t) => PROJECT_TARGET_PATHS[t.name],
     );
+
+    /* 使用工具目录检测，仅展示当前项目实际使用的 AI 工具 */
+    const detectedTargets = detectProjectTools(projectDir, mappedTargets);
+    /* 如果都没检测到，则展示所有有映射的目标（状态都会显示为未同步） */
+    const projectTargets =
+      detectedTargets.length > 0 ? detectedTargets : mappedTargets;
 
     if (projectTargets.length > 0) {
       console.log('');
