@@ -1,6 +1,7 @@
 /**
  * 同步引擎模块
  * 基于 hash 对比的文件夹全量拷贝同步
+ * v0.2.0：支持多资源类型，路径由 handler 的 resourceDirName 推导
  */
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
@@ -8,11 +9,13 @@ import path from 'node:path';
 import { checkbox } from '@inquirer/prompts';
 import { hashDirectory, hashDirectorySafe } from './hasher.js';
 import { expandTilde } from '../config/manager.js';
+import { getHandler } from './resources/registry.js';
 import { logger } from '../utils/logger.js';
 import type {
   Config,
   Target,
-  SkillInfo,
+  ResourceInfo,
+  ResourceType,
   SkillSyncResult,
   SkillTargetSyncResult,
   SyncSummary,
@@ -43,62 +46,91 @@ async function copyDirectory(srcDir: string, destDir: string): Promise<void> {
     const destPath = path.join(destDir, entry.name);
 
     if (entry.isDirectory()) {
-      /* 递归拷贝子目录 */
       await copyDirectory(srcPath, destPath);
     } else if (entry.isFile()) {
-      /* 拷贝文件 */
       await fs.copyFile(srcPath, destPath);
     }
   }
 }
 
 /**
- * 将单个 Skill 同步到单个目标
- * @param skill Skill 元数据
+ * 推导用户级目标目录
+ * 规则：<user_base>/<resource_dir_name>/
  * @param target 目标工具配置
+ * @param type 资源类型
+ * @returns 用户级目标基础目录的绝对路径
+ */
+export function getUserTargetDir(target: Target, type: ResourceType): string {
+  const handler = getHandler(type);
+  return path.join(expandTilde(target.user_base), handler.resourceDirName);
+}
+
+/**
+ * 推导项目级目标目录
+ * 规则：<projectDir>/.<targetName>/<resource_dir_name>/
+ * @param projectDir 项目根目录
+ * @param targetName 目标工具名称
+ * @param type 资源类型
+ * @returns 项目级目标基础目录的绝对路径
+ */
+export function getProjectTargetDir(
+  projectDir: string,
+  targetName: string,
+  type: ResourceType,
+): string {
+  const handler = getHandler(type);
+  return path.join(projectDir, `.${targetName}`, handler.resourceDirName);
+}
+
+/**
+ * 将单个资源同步到单个目标（基于 hash 对比）
+ * @param resource 资源元数据
+ * @param targetBaseDir 目标基础目录绝对路径
+ * @param targetName 目标工具名称（用于返回结果）
  * @returns 同步结果（动作类型：created / updated / skipped）
  */
-async function syncSkillToTarget(
-  skill: SkillInfo,
-  target: Target,
+async function syncResourceToDir(
+  resource: ResourceInfo,
+  targetBaseDir: string,
+  targetName: string,
 ): Promise<SkillTargetSyncResult> {
-  const targetBaseDir = expandTilde(target.user_path);
-  const targetSkillDir = path.join(targetBaseDir, skill.dirName);
+  const targetResourceDir = path.join(targetBaseDir, resource.dirName);
 
-  /* 计算源目录的 hash */
-  const sourceHash = await hashDirectory(skill.path);
+  /* 计算源目录 hash */
+  const sourceHash = await hashDirectory(resource.path);
 
-  /* 计算目标目录的 hash（不存在时为 null） */
-  const targetHash = await hashDirectorySafe(targetSkillDir);
+  /* 计算目标目录 hash（不存在时为 null） */
+  const targetHash = await hashDirectorySafe(targetResourceDir);
 
   /* 判断是否需要同步 */
   if (targetHash !== null && sourceHash === targetHash) {
-    /* hash 一致，无需同步 */
-    return { targetName: target.name, action: 'skipped' };
+    return { targetName, action: 'skipped' };
   }
 
   /* 确保目标基础目录存在 */
   await fs.mkdir(targetBaseDir, { recursive: true });
 
   /* 执行全量拷贝 */
-  await copyDirectory(skill.path, targetSkillDir);
+  await copyDirectory(resource.path, targetResourceDir);
 
   /* 判断是新增还是更新 */
   const action = targetHash === null ? 'created' : 'updated';
-  return { targetName: target.name, action };
+  return { targetName, action };
 }
 
 /**
- * 执行完整的同步操作
- * 将所有 Skills 同步到所有已启用的目标
- * @param skills 源目录中扫描到的 Skill 列表
+ * 执行用户级同步
+ * 将指定资源类型的所有用户级资源同步到所有已启用目标的 <user_base>/<resource_dir_name>/ 目录
+ * @param resources 已扫描的用户级资源列表
  * @param config 全局配置对象
+ * @param type 资源类型
  * @param targetFilter 可选，指定单个目标名称进行过滤
  * @returns 同步结果摘要
  */
-export async function syncAllSkills(
-  skills: SkillInfo[],
+export async function syncAllResources(
+  resources: ResourceInfo[],
   config: Config,
+  type: ResourceType,
   targetFilter?: string,
 ): Promise<SyncSummary> {
   /* 筛选已启用的目标 */
@@ -109,13 +141,7 @@ export async function syncAllSkills(
     targets = targets.filter((t) => t.name === targetFilter);
     if (targets.length === 0) {
       logger.error(`未找到目标工具: ${targetFilter}`);
-      return {
-        totalSkills: skills.length,
-        created: 0,
-        updated: 0,
-        skipped: 0,
-        results: [],
-      };
+      return emptySummary(resources.length);
     }
   }
 
@@ -124,16 +150,16 @@ export async function syncAllSkills(
   let updated = 0;
   let skipped = 0;
 
-  /* 遍历每个 Skill，同步到每个目标 */
-  for (const skill of skills) {
+  /* 遍历每个资源，同步到每个目标 */
+  for (const resource of resources) {
     const targetResults: SkillTargetSyncResult[] = [];
 
     for (const target of targets) {
+      const targetBaseDir = getUserTargetDir(target, type);
       try {
-        const result = await syncSkillToTarget(skill, target);
+        const result = await syncResourceToDir(resource, targetBaseDir, target.name);
         targetResults.push(result);
 
-        /* 统计计数 */
         if (result.action === 'created') {
           created++;
         } else if (result.action === 'updated') {
@@ -143,20 +169,20 @@ export async function syncAllSkills(
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        logger.error(`同步 ${skill.dirName} → ${target.name} 失败: ${message}`);
+        logger.error(`同步 ${resource.dirName} → ${target.name} 失败: ${message}`);
         targetResults.push({ targetName: target.name, action: 'skipped' });
         skipped++;
       }
     }
 
     results.push({
-      skillName: skill.dirName,
+      skillName: resource.dirName,
       targetResults,
     });
   }
 
   return {
-    totalSkills: skills.length,
+    totalSkills: resources.length,
     created,
     updated,
     skipped,
@@ -165,126 +191,69 @@ export async function syncAllSkills(
 }
 
 /**
- * 目标工具名称到项目级子目录的映射
- * 项目级 Skill 存储在项目根目录下的对应工具目录中
+ * 生成空的同步摘要
+ * @param total 资源总数
+ * @returns 空摘要对象
  */
-export const PROJECT_TARGET_PATHS: Record<string, string> = {
-  codebuddy: '.codebuddy/skills',
-  'claude-code': '.claude/skills',
-};
-
-/**
- * 目标工具名称到工具根目录名的映射
- * 用于检测当前项目使用的 AI 工具（检测根目录而非 skills 子目录）
- */
-export const PROJECT_TOOL_DIRS: Record<string, string> = {
-  codebuddy: '.codebuddy',
-  'claude-code': '.claude',
-};
+function emptySummary(total: number): SyncSummary {
+  return {
+    totalSkills: total,
+    created: 0,
+    updated: 0,
+    skipped: 0,
+    results: [],
+  };
+}
 
 /**
  * 检测项目目录中实际存在的 AI 工具
- * 通过判断项目根目录下是否存在对应的工具目录（如 .codebuddy/、.claude/）来确定
+ * 通过判断项目根目录下是否存在 .<targetName>/ 目录
  * @param projectDir 项目根目录的绝对路径
- * @param targets 已启用且有项目级路径映射的目标列表
- * @returns 检测到的目标列表（仅包含存在工具目录的目标）
+ * @param targets 已启用的目标列表
+ * @returns 检测到的目标列表
  */
 export function detectProjectTools(
   projectDir: string,
   targets: Target[],
 ): Target[] {
   return targets.filter((t) => {
-    const toolDir = PROJECT_TOOL_DIRS[t.name];
-    if (!toolDir) {
-      return false;
-    }
-    const toolDirPath = path.join(projectDir, toolDir);
+    const toolDirPath = path.join(projectDir, `.${t.name}`);
     return fsSync.existsSync(toolDirPath);
   });
 }
 
 /**
- * 将单个 Skill 同步到项目级单个目标
- * @param skill Skill 元数据
- * @param targetName 目标工具名称
- * @param projectDir 项目根目录的绝对路径
- * @returns 同步结果（动作类型：created / updated / skipped）
- */
-async function syncSkillToProjectTarget(
-  skill: SkillInfo,
-  targetName: string,
-  projectDir: string,
-): Promise<SkillTargetSyncResult> {
-  const relativePath = PROJECT_TARGET_PATHS[targetName];
-  if (!relativePath) {
-    /* 该工具没有项目级路径映射，跳过 */
-    return { targetName, action: 'skipped' };
-  }
-
-  const targetBaseDir = path.join(projectDir, relativePath);
-  const targetSkillDir = path.join(targetBaseDir, skill.dirName);
-
-  /* 计算源目录的 hash */
-  const sourceHash = await hashDirectory(skill.path);
-
-  /* 计算目标目录的 hash（不存在时为 null） */
-  const targetHash = await hashDirectorySafe(targetSkillDir);
-
-  /* 判断是否需要同步 */
-  if (targetHash !== null && sourceHash === targetHash) {
-    return { targetName, action: 'skipped' };
-  }
-
-  /* 确保目标基础目录存在 */
-  await fs.mkdir(targetBaseDir, { recursive: true });
-
-  /* 执行全量拷贝 */
-  await copyDirectory(skill.path, targetSkillDir);
-
-  /* 判断是新增还是更新 */
-  const action = targetHash === null ? 'created' : 'updated';
-  return { targetName, action };
-}
-
-/**
- * 执行项目级同步操作
- * 将指定的 Skills 同步到项目目录下各已启用目标的项目级路径
- * @param skills 要同步的 Skill 列表（已过滤，仅包含项目关联的 Skills）
+ * 执行项目级同步
+ * 将指定资源同步到项目目录下各已启用目标的 .<targetName>/<resource_dir_name>/ 目录
+ * @param resources 要同步的资源列表（项目关联的资源）
  * @param config 全局配置对象
  * @param projectDir 项目根目录的绝对路径
+ * @param type 资源类型
  * @param targetFilter 可选，指定单个目标名称进行过滤
  * @returns 同步结果摘要
  */
-export async function syncProjectSkills(
-  skills: SkillInfo[],
+export async function syncProjectResources(
+  resources: ResourceInfo[],
   config: Config,
   projectDir: string,
+  type: ResourceType,
   targetFilter?: string,
 ): Promise<SyncSummary> {
-  /* 筛选已启用且有项目级路径映射的目标 */
-  let targets = config.targets.filter(
-    (t) => t.enabled && PROJECT_TARGET_PATHS[t.name],
-  );
+  /* 筛选已启用的目标 */
+  let targets = config.targets.filter((t) => t.enabled);
 
   /* 如果指定了目标过滤器，进一步筛选（--target 优先级高于检测逻辑） */
   if (targetFilter) {
     targets = targets.filter((t) => t.name === targetFilter);
     if (targets.length === 0) {
       logger.error(`未找到目标工具: ${targetFilter}`);
-      return {
-        totalSkills: skills.length,
-        created: 0,
-        updated: 0,
-        skipped: 0,
-        results: [],
-      };
+      return emptySummary(resources.length);
     }
   } else {
     /* 未指定 --target 时，检测当前项目实际使用的 AI 工具 */
     const detectedTargets = detectProjectTools(projectDir, targets);
 
     if (detectedTargets.length > 0) {
-      /* 仅同步到检测到的工具 */
       targets = detectedTargets;
     } else {
       /* 都不存在，交互式选择 */
@@ -302,13 +271,7 @@ export async function syncProjectSkills(
 
       if (selected.length === 0) {
         logger.warn('未选择任何目标工具，取消同步');
-        return {
-          totalSkills: skills.length,
-          created: 0,
-          updated: 0,
-          skipped: 0,
-          results: [],
-        };
+        return emptySummary(resources.length);
       }
 
       targets = targets.filter((t) => selected.includes(t.name));
@@ -320,16 +283,16 @@ export async function syncProjectSkills(
   let updated = 0;
   let skipped = 0;
 
-  /* 遍历每个 Skill，同步到每个目标的项目级目录 */
-  for (const skill of skills) {
+  /* 遍历每个资源，同步到每个目标的项目级目录 */
+  for (const resource of resources) {
     const targetResults: SkillTargetSyncResult[] = [];
 
     for (const target of targets) {
+      const targetBaseDir = getProjectTargetDir(projectDir, target.name, type);
       try {
-        const result = await syncSkillToProjectTarget(skill, target.name, projectDir);
+        const result = await syncResourceToDir(resource, targetBaseDir, target.name);
         targetResults.push(result);
 
-        /* 统计计数 */
         if (result.action === 'created') {
           created++;
         } else if (result.action === 'updated') {
@@ -339,23 +302,50 @@ export async function syncProjectSkills(
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        logger.error(`项目级同步 ${skill.dirName} → ${target.name} 失败: ${message}`);
+        logger.error(
+          `项目级同步 ${resource.dirName} → ${target.name} 失败: ${message}`,
+        );
         targetResults.push({ targetName: target.name, action: 'skipped' });
         skipped++;
       }
     }
 
     results.push({
-      skillName: skill.dirName,
+      skillName: resource.dirName,
       targetResults,
     });
   }
 
   return {
-    totalSkills: skills.length,
+    totalSkills: resources.length,
     created,
     updated,
     skipped,
     results,
   };
 }
+
+/* ============================================================
+ * 旧 API 兼容别名（便于渐进迁移）
+ * ============================================================ */
+
+/**
+ * @deprecated 请使用 syncAllResources(resources, config, 'skills', targetFilter)
+ */
+export const syncAllSkills = (
+  resources: ResourceInfo[],
+  config: Config,
+  targetFilter?: string,
+): Promise<SyncSummary> =>
+  syncAllResources(resources, config, 'skills', targetFilter);
+
+/**
+ * @deprecated 请使用 syncProjectResources(resources, config, projectDir, 'skills', targetFilter)
+ */
+export const syncProjectSkills = (
+  resources: ResourceInfo[],
+  config: Config,
+  projectDir: string,
+  targetFilter?: string,
+): Promise<SyncSummary> =>
+  syncProjectResources(resources, config, projectDir, 'skills', targetFilter);

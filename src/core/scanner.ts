@@ -1,134 +1,60 @@
 /**
- * Skill 目录扫描模块
- * 负责扫描源目录中的 Skill 文件夹，并解析 SKILL.md frontmatter 元数据
+ * 资源目录扫描模块（通用入口）
+ * v0.2.0 起：具体的资源识别/元数据解析逻辑迁移到各 ResourceHandler 中
+ * 本文件仅作为调用入口，根据资源类型分发到对应的 handler
  */
-import fs from 'node:fs/promises';
-import path from 'node:path';
-import { parse as parseYaml } from 'yaml';
-import { logger } from '../utils/logger.js';
-import type { SkillInfo } from '../types/index.js';
-
-/** Skill 主文件名（必需文件） */
-const SKILL_FILE_NAME = 'SKILL.md';
-
-/** frontmatter 分隔符 */
-const FRONTMATTER_DELIMITER = '---';
+import { getHandler } from './resources/registry.js';
+import type {
+  ResourceInfo,
+  ResourceScope,
+  ResourceType,
+  SkillInfo,
+} from '../types/index.js';
 
 /**
- * 从 SKILL.md 文件内容中解析 YAML frontmatter
- * frontmatter 是文件开头由 --- 包裹的 YAML 块
- * @param content SKILL.md 文件的完整文本内容
- * @returns 解析出的 frontmatter 对象，解析失败返回 null
+ * 扫描指定资源类型在指定 scope 下的所有有效资源
+ * 内部通过 Registry 查找对应 handler 并调用其 scan 方法
+ * @param sourceDir 源目录根路径（已展开 ~）
+ * @param type 资源类型
+ * @param scope 资源层级（user/project）
+ * @returns 资源元数据数组；scope 目录不存在时返回空数组
  */
-function parseFrontmatter(content: string): Record<string, unknown> | null {
-  const trimmed = content.trimStart();
-
-  /* 检查是否以 --- 开头 */
-  if (!trimmed.startsWith(FRONTMATTER_DELIMITER)) {
-    return null;
+export async function scanResources(
+  sourceDir: string,
+  type: ResourceType,
+  scope: ResourceScope,
+): Promise<ResourceInfo[]> {
+  const handler = getHandler(type);
+  if (!handler.implemented) {
+    /* 未实现类型：返回空数组，让调用方决定是否输出提示 */
+    return [];
   }
-
-  /* 查找第二个 --- 的位置 */
-  const endIndex = trimmed.indexOf(FRONTMATTER_DELIMITER, FRONTMATTER_DELIMITER.length);
-  if (endIndex === -1) {
-    return null;
-  }
-
-  /* 提取 YAML 内容 */
-  const yamlStr = trimmed.slice(FRONTMATTER_DELIMITER.length, endIndex).trim();
-  if (!yamlStr) {
-    return null;
-  }
-
-  try {
-    const parsed = parseYaml(yamlStr);
-    if (parsed && typeof parsed === 'object') {
-      return parsed as Record<string, unknown>;
-    }
-    return null;
-  } catch {
-    /* YAML 解析失败，返回 null */
-    return null;
-  }
+  return handler.scan(sourceDir, scope);
 }
 
 /**
- * 从单个 Skill 文件夹中读取并解析元数据
- * @param skillDirPath Skill 文件夹的绝对路径
- * @returns SkillInfo 对象，包含名称、描述等信息
+ * 扫描指定资源类型的所有资源（同时包含 user 与 project 两个 scope）
+ * @param sourceDir 源目录根路径
+ * @param type 资源类型
+ * @returns 合并后的资源数组
  */
-async function parseSkillInfo(skillDirPath: string): Promise<SkillInfo> {
-  const dirName = path.basename(skillDirPath);
-  const skillFilePath = path.join(skillDirPath, SKILL_FILE_NAME);
-
-  /* 默认值：使用文件夹名作为名称 */
-  const info: SkillInfo = {
-    name: dirName,
-    description: '-',
-    path: skillDirPath,
-    dirName,
-  };
-
-  try {
-    const content = await fs.readFile(skillFilePath, 'utf-8');
-    const frontmatter = parseFrontmatter(content);
-
-    if (frontmatter) {
-      /* 优先使用 frontmatter 中的 name */
-      if (typeof frontmatter.name === 'string' && frontmatter.name.trim()) {
-        info.name = frontmatter.name.trim();
-      }
-      /* 提取 description */
-      if (typeof frontmatter.description === 'string' && frontmatter.description.trim()) {
-        info.description = frontmatter.description.trim();
-      }
-    }
-  } catch {
-    /* 读取或解析失败，使用默认值 */
-    logger.warn(`读取 ${dirName}/SKILL.md 失败，使用文件夹名作为默认值`);
-  }
-
-  return info;
+export async function scanAllScopes(
+  sourceDir: string,
+  type: ResourceType,
+): Promise<ResourceInfo[]> {
+  const [userList, projectList] = await Promise.all([
+    scanResources(sourceDir, type, 'user'),
+    scanResources(sourceDir, type, 'project'),
+  ]);
+  return [...userList, ...projectList];
 }
 
 /**
- * 扫描源目录中的所有有效 Skill 文件夹
- * 有效 Skill 文件夹 = 包含 SKILL.md 文件的子目录
- * @param sourceDir 源目录的绝对路径
- * @returns 所有有效 Skill 的元数据数组
+ * 旧 API 兼容：扫描 skills（仅 user 层级）
+ * @deprecated 请使用 scanResources(sourceDir, 'skills', 'user')
+ * @param sourceDir 源目录绝对路径
+ * @returns 用户级 Skills 列表
  */
 export async function scanSkills(sourceDir: string): Promise<SkillInfo[]> {
-  const skills: SkillInfo[] = [];
-
-  try {
-    const entries = await fs.readdir(sourceDir, { withFileTypes: true });
-
-    for (const entry of entries) {
-      /* 只处理目录 */
-      if (!entry.isDirectory()) {
-        continue;
-      }
-
-      const skillDirPath = path.join(sourceDir, entry.name);
-      const skillFilePath = path.join(skillDirPath, SKILL_FILE_NAME);
-
-      /* 检查是否包含 SKILL.md */
-      try {
-        await fs.access(skillFilePath);
-      } catch {
-        /* 不包含 SKILL.md，跳过 */
-        continue;
-      }
-
-      /* 解析 Skill 元数据 */
-      const info = await parseSkillInfo(skillDirPath);
-      skills.push(info);
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    logger.error(`扫描源目录失败: ${message}`);
-  }
-
-  /* 按名称排序，输出稳定 */
-  return skills.sort((a, b) => a.dirName.localeCompare(b.dirName));
+  return scanResources(sourceDir, 'skills', 'user');
 }

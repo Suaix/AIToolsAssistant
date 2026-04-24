@@ -4,5 +4,5 @@ dist/
 coverage/
 pnpm-debug.log*
 CODEBUDDY.md
-.codebuddy
+.codebuddy/
 .aitools

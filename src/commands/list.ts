@@ -1,37 +1,61 @@
 /**
  * list 命令处理模块
- * 列出源目录中所有 Skills 并展示同步状态（用户级 + 项目级两段式）
+ * v0.2.0：按资源类型展示同步状态（用户级 + 项目级两段式）
+ * 支持子命令参数（aitools list skills）与 --type 简写
  */
 import fs from 'node:fs/promises';
-import { loadConfig, expandTilde } from '../config/manager.js';
-import { scanSkills } from '../core/scanner.js';
-import { hashDirectory, hashDirectorySafe } from '../core/hasher.js';
-import { PROJECT_TARGET_PATHS, detectProjectTools } from '../core/syncer.js';
-import { loadProjectConfig } from '../config/project.js';
-import { logger } from '../utils/logger.js';
-import type { SkillInfo, SkillSyncStatus, Target } from '../types/index.js';
 import path from 'node:path';
+import { loadConfig, expandTilde } from '../config/manager.js';
+import { hashDirectory, hashDirectorySafe } from '../core/hasher.js';
+import {
+  getUserTargetDir,
+  getProjectTargetDir,
+  detectProjectTools,
+} from '../core/syncer.js';
+import {
+  loadProjectConfig,
+  getProjectResourceList,
+} from '../config/project.js';
+import {
+  getHandler,
+  isValidResourceType,
+  listImplementedHandlers,
+  listAllTypes,
+} from '../core/resources/registry.js';
+import { logger } from '../utils/logger.js';
+import type {
+  Config,
+  ResourceInfo,
+  ResourceType,
+  SkillSyncStatus,
+  Target,
+} from '../types/index.js';
+
+/**
+ * 列表命令的选项参数
+ */
+interface ListCommandOptions {
+  /** 可选，资源类型简写 */
+  type?: string;
+}
 
 /**
  * 计算字符串在终端中的实际显示宽度
- * CJK（中日韩）字符占 2 个宽度，其他字符占 1 个宽度
- * @param str 需要计算宽度的字符串
- * @returns 终端显示宽度
+ * CJK 字符占 2 宽度，其他占 1 宽度
  */
 function getStringWidth(str: string): number {
   let width = 0;
   for (const char of str) {
     const code = char.codePointAt(0) ?? 0;
-    /* CJK 统一表意文字范围 */
     const isCJK =
-      (code >= 0x4e00 && code <= 0x9fff) || /* CJK 基本区 */
-      (code >= 0x3400 && code <= 0x4dbf) || /* CJK 扩展A */
-      (code >= 0x20000 && code <= 0x2a6df) || /* CJK 扩展B */
-      (code >= 0xf900 && code <= 0xfaff) || /* CJK 兼容表意文字 */
-      (code >= 0x2e80 && code <= 0x2eff) || /* CJK 部首补充 */
-      (code >= 0x3000 && code <= 0x303f) || /* CJK 符号和标点 */
-      (code >= 0xff01 && code <= 0xff60) || /* 全角 ASCII 变体 */
-      (code >= 0xffe0 && code <= 0xffe6); /* 全角符号 */
+      (code >= 0x4e00 && code <= 0x9fff) ||
+      (code >= 0x3400 && code <= 0x4dbf) ||
+      (code >= 0x20000 && code <= 0x2a6df) ||
+      (code >= 0xf900 && code <= 0xfaff) ||
+      (code >= 0x2e80 && code <= 0x2eff) ||
+      (code >= 0x3000 && code <= 0x303f) ||
+      (code >= 0xff01 && code <= 0xff60) ||
+      (code >= 0xffe0 && code <= 0xffe6);
     width += isCJK ? 2 : 1;
   }
   return width;
@@ -39,10 +63,6 @@ function getStringWidth(str: string): number {
 
 /**
  * 用空格将字符串填充到指定的终端显示宽度
- * 与 String.padEnd() 不同，此函数正确处理 CJK 字符宽度
- * @param str 原始字符串
- * @param targetWidth 目标终端宽度
- * @returns 填充后的字符串
  */
 function padEndWidth(str: string, targetWidth: number): string {
   const currentWidth = getStringWidth(str);
@@ -52,15 +72,10 @@ function padEndWidth(str: string, targetWidth: number): string {
 
 /**
  * 使用 Unicode Box Drawing 字符渲染对齐表格
- * 自动根据各列内容的实际终端宽度计算列宽
- * @param headers 表头数组
- * @param rows 数据行数组（每行是一个字符串数组）
- * @returns 渲染好的表格字符串（包含换行符）
  */
 function formatTable(headers: string[], rows: string[][]): string {
   const colCount = headers.length;
 
-  /* 计算每列的最大显示宽度 */
   const colWidths: number[] = [];
   for (let i = 0; i < colCount; i++) {
     let maxWidth = getStringWidth(headers[i]);
@@ -73,19 +88,18 @@ function formatTable(headers: string[], rows: string[][]): string {
     colWidths.push(maxWidth);
   }
 
-  /* 构建分隔线 */
   const separatorCells = colWidths.map((w) => '─'.repeat(w + 2));
   const topBorder = `┌${separatorCells.join('┬')}┐`;
   const midBorder = `├${separatorCells.join('┼')}┤`;
   const botBorder = `└${separatorCells.join('┴')}┘`;
 
-  /* 构建行内容 */
   const buildRow = (cells: string[]): string => {
-    const paddedCells = cells.map((cell, i) => ` ${padEndWidth(cell, colWidths[i])} `);
+    const paddedCells = cells.map(
+      (cell, i) => ` ${padEndWidth(cell, colWidths[i])} `,
+    );
     return `│${paddedCells.join('│')}│`;
   };
 
-  /* 拼装完整表格 */
   const lines: string[] = [];
   lines.push(topBorder);
   lines.push(buildRow(headers));
@@ -99,34 +113,7 @@ function formatTable(headers: string[], rows: string[][]): string {
 }
 
 /**
- * 获取单个 Skill 在单个目标中的同步状态
- * @param sourceHash 源目录预计算的 hash 值
- * @param skill Skill 元数据
- * @param target 目标工具配置
- * @returns 同步状态码
- */
-async function getSkillTargetStatus(
-  sourceHash: string,
-  skill: SkillInfo,
-  target: Target,
-): Promise<SkillSyncStatus> {
-  const targetBaseDir = expandTilde(target.user_path);
-  const targetSkillDir = path.join(targetBaseDir, skill.dirName);
-
-  /* 计算目标目录 hash */
-  const targetHash = await hashDirectorySafe(targetSkillDir);
-
-  if (targetHash === null) {
-    return 'not_synced';
-  }
-
-  return sourceHash === targetHash ? 'synced' : 'changed';
-}
-
-/**
  * 格式化同步状态为终端展示字符串
- * @param status 同步状态码
- * @returns 带图标的状态文案
  */
 function formatStatus(status: SkillSyncStatus): string {
   switch (status) {
@@ -139,19 +126,16 @@ function formatStatus(status: SkillSyncStatus): string {
   }
 }
 
-/** Skill 名称最大显示宽度（超过则截断） */
+/** 资源名称最大显示宽度 */
 const MAX_NAME_WIDTH = 20;
 
 /**
- * 截断 Skill 名称到指定最大宽度，超出部分用 ... 替代
- * @param name Skill 名称
- * @returns 截断后的名称
+ * 截断资源名称到指定最大宽度
  */
 function truncateName(name: string): string {
   if (getStringWidth(name) <= MAX_NAME_WIDTH) {
     return name;
   }
-  /* 逐字符累加宽度直到达到限制 */
   let width = 0;
   let result = '';
   for (const char of name) {
@@ -166,7 +150,6 @@ function truncateName(name: string): string {
       (code >= 0xff01 && code <= 0xff60) ||
       (code >= 0xffe0 && code <= 0xffe6);
     const charWidth = isCJK ? 2 : 1;
-    /* 预留 3 个字符宽度给 ... */
     if (width + charWidth > MAX_NAME_WIDTH - 3) {
       break;
     }
@@ -177,67 +160,229 @@ function truncateName(name: string): string {
 }
 
 /**
- * 目标工具名称映射（内部标识 → 显示名称）
+ * 目标工具显示名称映射
  */
 const TARGET_DISPLAY_NAMES: Record<string, string> = {
   codebuddy: 'CodeBuddy',
   'claude-code': 'Claude Code',
 };
 
-/**
- * 获取目标工具的显示名称
- * @param targetName 目标工具内部名称
- * @returns 友好显示名称
- */
 function getTargetDisplayName(targetName: string): string {
   return TARGET_DISPLAY_NAMES[targetName] ?? targetName;
 }
 
 /**
- * 获取单个 Skill 在项目级单个目标中的同步状态
- * @param sourceHash 源目录预计算的 hash 值
- * @param skillDirName Skill 文件夹名
- * @param targetName 目标工具名称
- * @param projectDir 项目根目录的绝对路径
- * @returns 同步状态码
+ * 获取单个资源在单个目标的用户级同步状态
  */
-async function getProjectSkillTargetStatus(
+async function getUserTargetStatus(
   sourceHash: string,
-  skillDirName: string,
-  targetName: string,
-  projectDir: string,
+  resource: ResourceInfo,
+  target: Target,
+  type: ResourceType,
 ): Promise<SkillSyncStatus> {
-  const relativePath = PROJECT_TARGET_PATHS[targetName];
-  if (!relativePath) {
-    return 'not_synced';
-  }
-
-  const targetSkillDir = path.join(projectDir, relativePath, skillDirName);
-  const targetHash = await hashDirectorySafe(targetSkillDir);
+  const targetBaseDir = getUserTargetDir(target, type);
+  const targetResourceDir = path.join(targetBaseDir, resource.dirName);
+  const targetHash = await hashDirectorySafe(targetResourceDir);
 
   if (targetHash === null) {
     return 'not_synced';
   }
-
   return sourceHash === targetHash ? 'synced' : 'changed';
 }
 
 /**
- * list 命令处理函数
- * 扫描源目录 Skills 并以表格形式展示各目标的同步状态
- * 自动检测项目级配置，如有则额外展示项目级同步状态（两段式布局）
+ * 获取单个资源在单个目标的项目级同步状态
  */
-export async function listCommand(): Promise<void> {
-  /* 读取配置文件 */
+async function getProjectTargetStatus(
+  sourceHash: string,
+  resourceDirName: string,
+  targetName: string,
+  projectDir: string,
+  type: ResourceType,
+): Promise<SkillSyncStatus> {
+  const targetBaseDir = getProjectTargetDir(projectDir, targetName, type);
+  const targetResourceDir = path.join(targetBaseDir, resourceDirName);
+  const targetHash = await hashDirectorySafe(targetResourceDir);
+
+  if (targetHash === null) {
+    return 'not_synced';
+  }
+  return sourceHash === targetHash ? 'synced' : 'changed';
+}
+
+/**
+ * 输出单个资源类型的用户级 + 项目级两段式列表
+ * @param type 资源类型
+ * @param config 全局配置
+ * @returns 是否存在未同步资源（用于底部提示聚合）
+ */
+async function listOneType(type: ResourceType, config: Config): Promise<boolean> {
+  const handler = getHandler(type);
+
+  /* 未实现类型：统一输出占位提示 */
+  if (!handler.implemented) {
+    console.log('');
+    logger.warn(`[${type}] 暂未支持，敬请期待`);
+    return false;
+  }
+
+  const sourceDir = expandTilde(config.source);
+
+  /* 扫描该类型的用户级资源 */
+  const userResources = await handler.scan(sourceDir, 'user');
+
+  const enabledTargets = config.targets.filter((t) => t.enabled);
+  let hasUnsynced = false;
+
+  /* ==================== 用户级表格 ==================== */
+  if (userResources.length === 0) {
+    console.log('');
+    logger.info(
+      `📋 [${type}] 用户级资源为空 (源: ${config.source}/${handler.resourceDirName}/user/)`,
+    );
+  } else {
+    console.log('');
+    logger.info(
+      `📋 [${type}] 用户级资源 (源: ${config.source}/${handler.resourceDirName}/user/)`,
+    );
+    console.log('');
+
+    const headers = [
+      '名称',
+      '源 hash',
+      ...enabledTargets.map((t) => getTargetDisplayName(t.name)),
+    ];
+
+    const skillHashMap = new Map<string, string>();
+    const rows: string[][] = [];
+
+    for (const resource of userResources) {
+      const sourceHash = await hashDirectory(resource.path);
+      skillHashMap.set(resource.dirName, sourceHash);
+      const shortHash = sourceHash.slice(0, 8);
+
+      const statusCells: string[] = [];
+      for (const target of enabledTargets) {
+        try {
+          const status = await getUserTargetStatus(
+            sourceHash,
+            resource,
+            target,
+            type,
+          );
+          statusCells.push(formatStatus(status));
+          if (status !== 'synced') {
+            hasUnsynced = true;
+          }
+        } catch {
+          statusCells.push(formatStatus('not_synced'));
+          hasUnsynced = true;
+        }
+      }
+
+      rows.push([truncateName(resource.name), shortHash, ...statusCells]);
+    }
+
+    console.log(formatTable(headers, rows));
+  }
+
+  /* ==================== 项目级表格（自动检测） ==================== */
+  const projectDir = process.cwd();
+  const projectConfig = await loadProjectConfig(projectDir);
+
+  if (!projectConfig) {
+    return hasUnsynced;
+  }
+
+  const associated = getProjectResourceList(projectConfig, type);
+  if (associated.length === 0) {
+    return hasUnsynced;
+  }
+
+  /* 项目关联的资源可能来自 user 或 project scope */
+  const projectScopeList = await handler.scan(sourceDir, 'project');
+  const allSource = [...projectScopeList, ...userResources];
+
+  /* 检测当前项目实际使用的 AI 工具；都没检测到则展示所有已启用目标 */
+  const detectedTargets = detectProjectTools(projectDir, enabledTargets);
+  const projectTargets =
+    detectedTargets.length > 0 ? detectedTargets : enabledTargets;
+
+  if (projectTargets.length === 0) {
+    return hasUnsynced;
+  }
+
+  console.log('');
+  logger.info(`📁 [${type}] 项目级资源 (项目: ${projectDir})`);
+  console.log('');
+
+  const projectHeaders = [
+    '名称',
+    '源 hash',
+    ...projectTargets.map((t) => getTargetDisplayName(t.name)),
+  ];
+  const projectRows: string[][] = [];
+
+  for (const resourceName of associated) {
+    const resource = allSource.find((r) => r.dirName === resourceName);
+
+    if (!resource) {
+      /* 源目录中不存在该资源，标注 (源已删除) */
+      const displayName = truncateName(`${resourceName} (源已删除)`);
+      const dashCells = projectTargets.map(() => '-');
+      projectRows.push([displayName, '-', ...dashCells]);
+      hasUnsynced = true;
+      continue;
+    }
+
+    const sourceHash = await hashDirectory(resource.path);
+    const shortHash = sourceHash.slice(0, 8);
+
+    const statusCells: string[] = [];
+    for (const target of projectTargets) {
+      try {
+        const status = await getProjectTargetStatus(
+          sourceHash,
+          resourceName,
+          target.name,
+          projectDir,
+          type,
+        );
+        statusCells.push(formatStatus(status));
+        if (status !== 'synced') {
+          hasUnsynced = true;
+        }
+      } catch {
+        statusCells.push(formatStatus('not_synced'));
+        hasUnsynced = true;
+      }
+    }
+
+    projectRows.push([truncateName(resource.name), shortHash, ...statusCells]);
+  }
+
+  console.log(formatTable(projectHeaders, projectRows));
+
+  return hasUnsynced;
+}
+
+/**
+ * list 命令处理函数
+ * @param typeArg commander 位置参数 [type]
+ * @param options 命令行选项（含 --type 简写）
+ */
+export async function listCommand(
+  typeArg: string | undefined,
+  options: ListCommandOptions,
+): Promise<void> {
+  /* 读取全局配置 */
   const config = await loadConfig();
   if (!config) {
     return;
   }
 
-  /* 展开源目录路径 */
-  const sourceDir = expandTilde(config.source);
-
   /* 校验源目录存在性 */
+  const sourceDir = expandTilde(config.source);
   try {
     const stat = await fs.stat(sourceDir);
     if (!stat.isDirectory()) {
@@ -249,148 +394,56 @@ export async function listCommand(): Promise<void> {
     return;
   }
 
-  /* 扫描源目录中的 Skills */
-  const skills = await scanSkills(sourceDir);
+  /* 解析资源类型参数 */
+  const raw = (typeArg ?? options.type ?? 'all').toLowerCase();
 
-  if (skills.length === 0) {
-    logger.info('源目录中没有发现任何 Skill');
-    logger.info(`源目录: ${config.source}`);
+  let types: ResourceType[];
+  if (raw === 'all') {
+    /* 列出所有已注册类型（含未实现，未实现类型会提示占位） */
+    types = listAllTypes();
+  } else if (isValidResourceType(raw)) {
+    types = [raw];
+  } else {
+    logger.error(
+      `未知的资源类型: ${raw}。可选值: ${['all', ...listAllTypes()].join(', ')}`,
+    );
     return;
   }
 
-  /* 筛选已启用的目标 */
+  /* 检查是否有已启用目标（影响表格列） */
   const enabledTargets = config.targets.filter((t) => t.enabled);
-
-  /* ==================== 用户级表格 ==================== */
-  console.log('');
-  logger.info(`📋 用户级 Skills (源: ${config.source})`);
-  console.log('');
-
-  /* 构建表头：固定列 + 动态目标列 */
-  const headers = [
-    'Skill 名称',
-    '源 hash',
-    ...enabledTargets.map((t) => getTargetDisplayName(t.name)),
-  ];
-
-  /* 是否存在未同步的 Skill（用于底部提示） */
-  let hasUnsyncedSkill = false;
-
-  /* 预计算所有 Skill 的源 hash（后续项目级复用） */
-  const skillHashMap = new Map<string, string>();
-
-  /* 采集每个 Skill 的数据行 */
-  const rows: string[][] = [];
-
-  for (const skill of skills) {
-    /* 计算源目录 hash（每个 Skill 只计算一次） */
-    const sourceHash = await hashDirectory(skill.path);
-    skillHashMap.set(skill.dirName, sourceHash);
-    /* 截取前 8 位作为短 hash */
-    const shortHash = sourceHash.slice(0, 8);
-
-    /* 获取各目标的独立同步状态 */
-    const statusCells: string[] = [];
-
-    for (const target of enabledTargets) {
-      try {
-        const status = await getSkillTargetStatus(sourceHash, skill, target);
-        statusCells.push(formatStatus(status));
-        if (status !== 'synced') {
-          hasUnsyncedSkill = true;
-        }
-      } catch {
-        statusCells.push(formatStatus('not_synced'));
-        hasUnsyncedSkill = true;
-      }
-    }
-
-    /* 组装数据行：名称（截断） | 源 hash | 各目标状态 */
-    rows.push([truncateName(skill.name), shortHash, ...statusCells]);
+  if (enabledTargets.length === 0) {
+    logger.warn('没有已启用的同步目标，建议运行 aitools init');
   }
 
-  /* 渲染并输出用户级表格 */
-  console.log(formatTable(headers, rows));
-
-  /* ==================== 项目级表格（自动检测） ==================== */
-  const projectDir = process.cwd();
-  const projectConfig = await loadProjectConfig(projectDir);
-
-  /* 仅当项目配置存在且有关联 Skills 时才显示 */
-  if (projectConfig && projectConfig.skills.length > 0) {
-    /* 筛选有项目级路径映射的目标 */
-    const mappedTargets = enabledTargets.filter(
-      (t) => PROJECT_TARGET_PATHS[t.name],
-    );
-
-    /* 使用工具目录检测，仅展示当前项目实际使用的 AI 工具 */
-    const detectedTargets = detectProjectTools(projectDir, mappedTargets);
-    /* 如果都没检测到，则展示所有有映射的目标（状态都会显示为未同步） */
-    const projectTargets =
-      detectedTargets.length > 0 ? detectedTargets : mappedTargets;
-
-    if (projectTargets.length > 0) {
-      console.log('');
-      logger.info(`📁 项目级 Skills (项目: ${projectDir})`);
-      console.log('');
-
-      /* 项目级表头 */
-      const projectHeaders = [
-        'Skill 名称',
-        '源 hash',
-        ...projectTargets.map((t) => getTargetDisplayName(t.name)),
-      ];
-
-      const projectRows: string[][] = [];
-
-      for (const skillName of projectConfig.skills) {
-        const skill = skills.find((s) => s.dirName === skillName);
-
-        if (!skill) {
-          /* 源目录中不存在该 Skill，标注 (源已删除) */
-          const displayName = truncateName(`${skillName} (源已删除)`);
-          const dashCells = projectTargets.map(() => '-');
-          projectRows.push([displayName, '-', ...dashCells]);
-          continue;
-        }
-
-        /* 复用已计算的源 hash */
-        const sourceHash = skillHashMap.get(skillName) ?? await hashDirectory(skill.path);
-        const shortHash = sourceHash.slice(0, 8);
-
-        const statusCells: string[] = [];
-
-        for (const target of projectTargets) {
-          try {
-            const status = await getProjectSkillTargetStatus(
-              sourceHash,
-              skillName,
-              target.name,
-              projectDir,
-            );
-            statusCells.push(formatStatus(status));
-            if (status !== 'synced') {
-              hasUnsyncedSkill = true;
-            }
-          } catch {
-            statusCells.push(formatStatus('not_synced'));
-            hasUnsyncedSkill = true;
-          }
-        }
-
-        projectRows.push([truncateName(skill.name), shortHash, ...statusCells]);
+  /* 对 all 场景：只输出已实现类型的表格，未实现类型汇总提示在末尾 */
+  let aggregateUnsynced = false;
+  if (raw === 'all') {
+    for (const handler of listImplementedHandlers()) {
+      const hasUnsynced = await listOneType(handler.type, config);
+      if (hasUnsynced) {
+        aggregateUnsynced = true;
       }
-
-      /* 渲染并输出项目级表格 */
-      console.log(formatTable(projectHeaders, projectRows));
+    }
+    const pending = types.filter((t) => !getHandler(t).implemented);
+    if (pending.length > 0) {
+      console.log('');
+      logger.warn(`以下资源类型暂未支持：${pending.join(', ')}`);
+    }
+  } else {
+    for (const t of types) {
+      const hasUnsynced = await listOneType(t, config);
+      if (hasUnsynced) {
+        aggregateUnsynced = true;
+      }
     }
   }
 
-  /* ==================== 底部综合提示 ==================== */
+  /* 底部提示 */
   console.log('');
-  if (hasUnsyncedSkill) {
+  if (aggregateUnsynced) {
     logger.info('💡 运行 aitools sync 同步最新变更');
   } else {
-    logger.success('所有 Skills 已同步到最新状态');
+    logger.success('所有资源已同步到最新状态');
   }
 }

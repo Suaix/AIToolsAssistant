@@ -1,7 +1,7 @@
 {
   "name": "aitools-cli",
-  "version": "0.1.0",
-  "description": "AI Agent 统一配置与技能同步管理工具",
+  "version": "0.2.0",
+  "description": "AI Agent 统一配置与资源同步管理工具（skills/commands/agents/rules）",
   "type": "module",
   "bin": {
     "aitools": "./dist/index.js"

@@ -1,6 +1,7 @@
 /**
  * 配置文件管理模块
  * 负责 ~/.aitools/config.yaml 的读取、写入和校验
+ * v0.2.0 破坏性变更：Target.user_path → user_base（根目录）
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -29,6 +30,15 @@ export function getConfigDir(): string {
  */
 export function getConfigPath(): string {
   return path.join(getConfigDir(), CONFIG_FILE_NAME);
+}
+
+/**
+ * 获取默认源目录的绝对路径
+ * v0.2.0：用户未显式指定源目录时，默认使用 ~/.aitools/（与 config.yaml 同目录）
+ * @returns 默认源目录的绝对路径
+ */
+export function getDefaultSourceDir(): string {
+  return getConfigDir();
 }
 
 /**
@@ -82,6 +92,7 @@ function getDefaultSyncOptions(): SyncOptions {
 
 /**
  * 获取默认同步目标列表
+ * v0.2.0：user_path → user_base；codebuddy 默认启用，claude-code 默认不启用
  * @returns 默认目标工具配置数组
  */
 export function getDefaultTargets(): Target[] {
@@ -89,12 +100,12 @@ export function getDefaultTargets(): Target[] {
     {
       name: 'codebuddy',
       enabled: true,
-      user_path: '~/.codebuddy/skills',
+      user_base: '~/.codebuddy',
     },
     {
       name: 'claude-code',
-      enabled: true,
-      user_path: '~/.claude/skills',
+      enabled: false,
+      user_base: '~/.claude',
     },
   ];
 }
@@ -102,6 +113,7 @@ export function getDefaultTargets(): Target[] {
 /**
  * 校验配置文件的有效性
  * 检查必需字段是否存在和格式是否正确
+ * 发现旧版字段（如 user_path）时抛出明确错误，引导用户重新初始化
  * @param config 待校验的配置对象
  * @returns 校验通过返回 true，否则抛出错误
  */
@@ -123,14 +135,25 @@ function validateConfig(config: unknown): config is Config {
   }
 
   for (const target of obj.targets) {
+    if (!target || typeof target !== 'object') {
+      throw new Error('配置文件 targets 中存在无效项');
+    }
     if (!target.name || typeof target.name !== 'string') {
       throw new Error('配置文件 targets 中存在缺少 name 字段的项');
     }
     if (typeof target.enabled !== 'boolean') {
       throw new Error(`目标 "${target.name}" 缺少有效的 enabled 字段`);
     }
-    if (!target.user_path || typeof target.user_path !== 'string') {
-      throw new Error(`目标 "${target.name}" 缺少有效的 user_path 字段`);
+
+    /* v0.2.0 破坏性校验：检测旧字段 user_path */
+    if ('user_path' in target && !('user_base' in target)) {
+      throw new Error(
+        `检测到旧版配置字段 user_path（目标 "${target.name}"），v0.2.0 已改为 user_base。请运行 aitools init 重新初始化配置。`,
+      );
+    }
+
+    if (!target.user_base || typeof target.user_base !== 'string') {
+      throw new Error(`目标 "${target.name}" 缺少有效的 user_base 字段`);
     }
   }
 
@@ -182,7 +205,7 @@ export async function saveConfig(config: Config): Promise<void> {
 
   /* 将配置序列化为 YAML 并写入 */
   const yamlContent = stringifyYaml(config, {
-    lineWidth: 0,       // 不自动换行
+    lineWidth: 0, // 不自动换行
     singleQuote: false, // 使用双引号
   });
 
@@ -191,7 +214,7 @@ export async function saveConfig(config: Config): Promise<void> {
 
 /**
  * 基于用户输入创建新的配置对象
- * @param source 用户指定的 Skills 源目录路径
+ * @param source 用户指定的资源源目录路径
  * @param targets 同步目标工具列表
  * @returns 完整的 Config 对象
  */
