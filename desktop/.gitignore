@@ -1,0 +1,20 @@
+# desktop 前端产物
+node_modules/
+dist/
+
+# 本地环境
+.env.local
+.env.*.local
+
+# 编辑器
+.vscode/
+.idea/
+
+# 系统
+.DS_Store
+
+# Vite
+.vite/
+
+# TypeScript 增量构建产物
+*.tsbuildinfo
