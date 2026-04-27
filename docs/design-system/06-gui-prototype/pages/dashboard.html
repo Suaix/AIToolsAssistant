@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>工作台 · aitools</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="../../tokens.css" />
+    <link rel="stylesheet" href="../../components.css" />
+    <script src="../scripts/app.js" defer></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <!-- ========== Sidebar ========== -->
+      <nav class="sidebar" aria-label="主导航">
+        <div class="sidebar__brand">
+          <span class="sidebar__logo" aria-hidden="true">A</span>
+          <span class="sidebar__name">aitools</span>
+        </div>
+
+        <ul class="sidebar__group">
+          <li>
+            <a class="nav-item" data-nav="dashboard.html" href="./dashboard.html">
+              <svg class="nav-item__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M3 12l9-9 9 9"/><path d="M5 10v10a1 1 0 0 0 1 1h3v-6h6v6h3a1 1 0 0 0 1-1V10"/>
+              </svg>
+              <span class="nav-item__label">工作台</span>
+            </a>
+          </li>
+        </ul>
+
+        <ul class="sidebar__group">
+          <li>
+            <a class="nav-item" data-nav="skills.html" href="./skills.html">
+              <svg class="nav-item__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M16.5 9.4 7.55 4.24"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.27 6.96 12 12.01l8.73-5.05"/><path d="M12 22.08V12"/>
+              </svg>
+              <span class="nav-item__label">Skills</span>
+              <span class="nav-item__badge">12</span>
+            </a>
+          </li>
+          <li>
+            <a class="nav-item nav-item--disabled" data-nav="commands.html" href="#">
+              <svg class="nav-item__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+              </svg>
+              <span class="nav-item__label">Commands</span>
+              <span class="nav-item__badge">—</span>
+            </a>
+          </li>
+          <li>
+            <a class="nav-item nav-item--disabled" data-nav="agents.html" href="#">
+              <svg class="nav-item__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><line x1="8" y1="16" x2="8" y2="16"/><line x1="16" y1="16" x2="16" y2="16"/>
+              </svg>
+              <span class="nav-item__label">Agents</span>
+              <span class="nav-item__badge">—</span>
+            </a>
+          </li>
+          <li>
+            <a class="nav-item nav-item--disabled" data-nav="rules.html" href="#">
+              <svg class="nav-item__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/><polyline points="14 2 14 8 20 8"/>
+              </svg>
+              <span class="nav-item__label">Rules</span>
+              <span class="nav-item__badge">—</span>
+            </a>
+          </li>
+        </ul>
+
+        <ul class="sidebar__group">
+          <li>
+            <a class="nav-item" data-nav="tools.html" href="./tools.html">
+              <svg class="nav-item__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+              </svg>
+              <span class="nav-item__label">已连接工具</span>
+              <span class="nav-item__badge">2</span>
+            </a>
+          </li>
+          <li>
+            <a class="nav-item" data-nav="projects.html" href="#">
+              <svg class="nav-item__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+              </svg>
+              <span class="nav-item__label">项目</span>
+              <span class="nav-item__badge">3</span>
+            </a>
+          </li>
+        </ul>
+
+        <div class="sidebar__spacer"></div>
+
+        <ul class="sidebar__group">
+          <li>
+            <a class="nav-item" data-nav="settings.html" href="./settings.html">
+              <svg class="nav-item__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+              </svg>
+              <span class="nav-item__label">设置</span>
+            </a>
+          </li>
+        </ul>
+      </nav>
+
+      <!-- ========== Main ========== -->
+      <main class="app-main">
+        <header class="app-main__header">
+          <h1 class="app-main__title">工作台</h1>
+          <div style="display:flex; gap: var(--space-2); align-items: center;">
+            <button class="btn btn--ghost btn--icon btn--sm" data-theme-toggle aria-label="切换主题">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+              </svg>
+            </button>
+          </div>
+        </header>
+
+        <div class="app-main__content">
+          <!-- ========== HeroCard ========== -->
+          <section class="hero-card hero-card--success" aria-live="polite">
+            <div class="hero-card__bar"></div>
+            <div class="hero-card__content">
+              <div class="hero-card__main">
+                <svg class="hero-card__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>
+                </svg>
+                <h2 class="hero-card__title">全部最新</h2>
+              </div>
+              <p class="hero-card__sub tabular-nums">
+                2 个工具 · 12 个 Skill · 2 分钟前同步
+              </p>
+            </div>
+            <div class="hero-card__action">
+              <button class="btn btn--secondary" onclick="demoStateChange()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="width:16px;height:16px;">
+                  <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                </svg>
+                重新扫描
+              </button>
+            </div>
+          </section>
+
+          <!-- ========== 最近同步 ========== -->
+          <section class="page-section">
+            <div class="page-section__header">
+              <h2 class="page-section__title">最近同步</h2>
+              <a class="page-section__link" href="./skills.html">查看全部 →</a>
+            </div>
+            <div class="card-stack">
+              <article class="card">
+                <header class="card__header">
+                  <h3 class="card__title">code-review</h3>
+                  <span class="badge badge--success"><span class="badge__dot"></span>已同步</span>
+                </header>
+                <div class="card__meta">
+                  <span class="font-mono">→ CodeBuddy · Claude Code</span>
+                  <span> · </span>
+                  <span class="tabular-nums">2 分钟前</span>
+                </div>
+              </article>
+              <article class="card">
+                <header class="card__header">
+                  <h3 class="card__title">git-workflow</h3>
+                  <span class="badge badge--success"><span class="badge__dot"></span>已同步</span>
+                </header>
+                <div class="card__meta">
+                  <span class="font-mono">→ Claude Code</span>
+                  <span> · </span>
+                  <span class="tabular-nums">10 分钟前</span>
+                </div>
+              </article>
+              <article class="card">
+                <header class="card__header">
+                  <h3 class="card__title">ts-expert</h3>
+                  <span class="badge badge--success"><span class="badge__dot"></span>已同步</span>
+                </header>
+                <div class="card__meta">
+                  <span class="font-mono">→ 2 个工具</span>
+                  <span> · </span>
+                  <span class="tabular-nums">1 小时前</span>
+                </div>
+              </article>
+            </div>
+          </section>
+
+          <!-- ========== 已连接工具 ========== -->
+          <section class="page-section">
+            <div class="page-section__header">
+              <h2 class="page-section__title">已连接工具</h2>
+              <a class="page-section__link" href="./tools.html">管理 →</a>
+            </div>
+            <div class="card-grid">
+              <article class="card">
+                <header class="card__header">
+                  <h3 class="card__title">CodeBuddy</h3>
+                  <span class="badge badge--success badge--sm"><span class="badge__dot"></span>已连接</span>
+                </header>
+                <div class="card__meta font-mono">~/.codebuddy/</div>
+                <p class="card__desc tabular-nums">12 Skill · 2 分钟前同步</p>
+              </article>
+              <article class="card">
+                <header class="card__header">
+                  <h3 class="card__title">Claude Code</h3>
+                  <span class="badge badge--success badge--sm"><span class="badge__dot"></span>已连接</span>
+                </header>
+                <div class="card__meta font-mono">~/.claude/</div>
+                <p class="card__desc tabular-nums">12 Skill · 10 分钟前同步</p>
+              </article>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <script>
+      // 演示：点击 "重新扫描" 切换 Hero 卡的状态（success → warning → danger → syncing → success）
+      const heroStates = [
+        {
+          className: "hero-card--success",
+          title: "全部最新",
+          sub: "2 个工具 · 12 个 Skill · 2 分钟前同步",
+          icon:
+            '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>',
+        },
+        {
+          className: "hero-card--warning",
+          title: "3 个 Skill 需更新",
+          sub: "分布在 2 个工具 · 点击查看差异",
+          icon:
+            '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
+        },
+        {
+          className: "hero-card--danger",
+          title: "1 项同步失败",
+          sub: "CodeBuddy 路径不存在 · 查看原因并重试",
+          icon:
+            '<circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>',
+        },
+        {
+          className: "hero-card--syncing",
+          title: "同步中…（2 / 3）",
+          sub: "预计还需 3 秒",
+          icon:
+            '<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>',
+        },
+      ];
+      let stateIdx = 0;
+      function demoStateChange() {
+        stateIdx = (stateIdx + 1) % heroStates.length;
+        const s = heroStates[stateIdx];
+        const hero = document.querySelector(".hero-card");
+        hero.className = "hero-card " + s.className;
+        hero.querySelector(".hero-card__title").textContent = s.title;
+        hero.querySelector(".hero-card__sub").textContent = s.sub;
+        hero.querySelector(".hero-card__icon").innerHTML = s.icon;
+      }
+    </script>
+  </body>
+</html>

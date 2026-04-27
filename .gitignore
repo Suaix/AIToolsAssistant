@@ -3,6 +3,5 @@ dist/
 .DS_Store
 coverage/
 pnpm-debug.log*
-CODEBUDDY.md
 .codebuddy/
 .aitools

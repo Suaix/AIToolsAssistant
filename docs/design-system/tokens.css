@@ -1,0 +1,414 @@
+/* ============================================================================
+ * AIToolsAssistant · Design Tokens
+ * ============================================================================
+ *
+ * 设计系统的视觉 Token CSS 变量实现。
+ *
+ * - 所有组件必须引用语义 Token（如 --color-brand-default）而非原始色值
+ * - 默认启用暗色模式（Dark-first，贴合 Alex 用户画像）
+ * - 通过 [data-theme="light"] 切换到浅色模式
+ * - 遵循 prefers-color-scheme 系统偏好
+ *
+ * 引用：docs/design-system/04-visual-language.md v1.0
+ * ============================================================================ */
+
+/* ----------------------------------------------------------------------------
+ * 1. 原子色阶（Palette Tokens）
+ *    通常不被组件直接引用，仅供语义 Token 引用
+ * ---------------------------------------------------------------------------- */
+:root {
+  /* 主品牌色 · Teal（暮光青） */
+  --teal-50:  #F0FDFA;
+  --teal-100: #CCFBF1;
+  --teal-200: #99F6E4;
+  --teal-300: #5EEAD4;
+  --teal-400: #2DD4BF;
+  --teal-500: #14B8A6;
+  --teal-600: #0D9488;
+  --teal-700: #0F766E;
+  --teal-800: #115E59;
+  --teal-900: #134E4A;
+  --teal-950: #042F2E;
+
+  /* 中性色 · Slate（石板灰） */
+  --slate-0:   #FFFFFF;
+  --slate-50:  #F8FAFC;
+  --slate-100: #F1F5F9;
+  --slate-200: #E2E8F0;
+  --slate-300: #CBD5E1;
+  --slate-400: #94A3B8;
+  --slate-500: #64748B;
+  --slate-600: #475569;
+  --slate-700: #334155;
+  --slate-800: #1E293B;
+  --slate-900: #0F172A;
+  --slate-950: #020617;
+
+  /* 成功色 · Mint 绿 */
+  --mint-100: #DCFCE7;
+  --mint-400: #4ADE80;
+  --mint-500: #22C55E;
+  --mint-600: #16A34A;
+  --mint-900: #14532D;
+
+  /* 警告色 · Amber 黄 */
+  --amber-100: #FEF3C7;
+  --amber-400: #FBBF24;
+  --amber-500: #F59E0B;
+  --amber-600: #D97706;
+  --amber-900: #78350F;
+
+  /* 危险色 · Rose 红 */
+  --rose-100: #FFE4E6;
+  --rose-400: #FB7185;
+  --rose-500: #F43F5E;
+  --rose-600: #E11D48;
+  --rose-900: #881337;
+
+  /* 信息色 · Sky 蓝 */
+  --sky-100: #E0F2FE;
+  --sky-400: #38BDF8;
+  --sky-500: #0EA5E9;
+  --sky-900: #0C4A6E;
+}
+
+/* ----------------------------------------------------------------------------
+ * 2. 语义 Token · 浅色模式
+ *    组件应当引用这些 Token
+ * ---------------------------------------------------------------------------- */
+:root,
+[data-theme="light"] {
+  /* 背景层级 */
+  --color-bg-canvas:    var(--slate-50);
+  --color-bg-default:   var(--slate-0);
+  --color-bg-subtle:    var(--slate-100);
+  --color-bg-muted:     var(--slate-100);
+  --color-bg-hover:     var(--slate-100);
+  --color-bg-selected:  var(--teal-50);
+  --color-bg-overlay:   rgba(15, 23, 42, 0.48);
+
+  /* 文字层级 */
+  --color-text-primary:      var(--slate-900);
+  --color-text-secondary:    var(--slate-600);
+  --color-text-tertiary:     var(--slate-500);
+  --color-text-placeholder:  var(--slate-400);
+  --color-text-disabled:     var(--slate-300);
+  --color-text-inverse:      var(--slate-0);
+
+  /* 边框 */
+  --color-border-default:  var(--slate-200);
+  --color-border-strong:   var(--slate-300);
+  --color-border-brand:    var(--teal-500);
+
+  /* 主品牌色 */
+  --color-brand-default:  var(--teal-500);
+  --color-brand-hover:    var(--teal-600);
+  --color-brand-active:   var(--teal-700);
+  --color-brand-subtle:   var(--teal-50);
+  --color-brand-muted:    var(--teal-100);
+
+  /* 语义状态色 */
+  --color-success:          var(--mint-500);
+  --color-success-subtle:   var(--mint-100);
+  --color-success-text:     var(--mint-600);
+
+  --color-warning:          var(--amber-500);
+  --color-warning-subtle:   var(--amber-100);
+  --color-warning-text:     var(--amber-600);
+
+  --color-danger:           var(--rose-500);
+  --color-danger-subtle:    var(--rose-100);
+  --color-danger-text:      var(--rose-600);
+
+  --color-info:             var(--sky-500);
+  --color-info-subtle:      var(--sky-100);
+
+  /* 阴影 */
+  --shadow-xs:     0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-sm:     0 2px 4px rgba(15, 23, 42, 0.06);
+  --shadow-md:     0 4px 12px rgba(15, 23, 42, 0.08);
+  --shadow-lg:     0 12px 32px rgba(15, 23, 42, 0.12);
+  --shadow-focus:  0 0 0 3px rgba(20, 184, 166, 0.24);
+}
+
+/* ----------------------------------------------------------------------------
+ * 3. 语义 Token · 暗色模式（默认）
+ *    暗色优先：dark-first
+ * ---------------------------------------------------------------------------- */
+[data-theme="dark"] {
+  /* 背景层级（三层深度感） */
+  --color-bg-canvas:    var(--slate-950);
+  --color-bg-default:   var(--slate-900);
+  --color-bg-subtle:    var(--slate-800);
+  --color-bg-muted:     var(--slate-800);
+  --color-bg-hover:     var(--slate-800);
+  --color-bg-selected:  var(--teal-950);
+  --color-bg-overlay:   rgba(2, 6, 23, 0.72);
+
+  /* 文字层级 */
+  --color-text-primary:      var(--slate-50);
+  --color-text-secondary:    var(--slate-300);
+  --color-text-tertiary:     var(--slate-400);
+  --color-text-placeholder:  var(--slate-500);
+  --color-text-disabled:     var(--slate-600);
+  --color-text-inverse:      var(--slate-900);
+
+  /* 边框 */
+  --color-border-default:  var(--slate-700);
+  --color-border-strong:   var(--slate-600);
+  --color-border-brand:    var(--teal-400);
+
+  /* 主品牌色（降低饱和度避免烧眼） */
+  --color-brand-default:  var(--teal-400);
+  --color-brand-hover:    var(--teal-300);
+  --color-brand-active:   var(--teal-500);
+  --color-brand-subtle:   var(--teal-950);
+  --color-brand-muted:    var(--teal-900);
+
+  /* 语义状态色（暗模式降低饱和度） */
+  --color-success:          var(--mint-400);
+  --color-success-subtle:   var(--mint-900);
+  --color-success-text:     var(--mint-400);
+
+  --color-warning:          var(--amber-400);
+  --color-warning-subtle:   var(--amber-900);
+  --color-warning-text:     var(--amber-400);
+
+  --color-danger:           var(--rose-400);
+  --color-danger-subtle:    var(--rose-900);
+  --color-danger-text:      var(--rose-400);
+
+  --color-info:             var(--sky-400);
+  --color-info-subtle:      var(--sky-900);
+
+  /* 阴影（暗模式更深） */
+  --shadow-xs:     0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-sm:     0 2px 4px rgba(0, 0, 0, 0.5);
+  --shadow-md:     0 4px 12px rgba(0, 0, 0, 0.6);
+  --shadow-lg:     0 12px 32px rgba(0, 0, 0, 0.7);
+  --shadow-focus:  0 0 0 3px rgba(45, 212, 191, 0.32);
+}
+
+/* 跟随系统偏好（当未显式指定 data-theme 时） */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    /* 背景层级（三层深度感） */
+    --color-bg-canvas:    var(--slate-950);
+    --color-bg-default:   var(--slate-900);
+    --color-bg-subtle:    var(--slate-800);
+    --color-bg-muted:     var(--slate-800);
+    --color-bg-hover:     var(--slate-800);
+    --color-bg-selected:  var(--teal-950);
+    --color-bg-overlay:   rgba(2, 6, 23, 0.72);
+
+    /* 文字层级 */
+    --color-text-primary:      var(--slate-50);
+    --color-text-secondary:    var(--slate-300);
+    --color-text-tertiary:     var(--slate-400);
+    --color-text-placeholder:  var(--slate-500);
+    --color-text-disabled:     var(--slate-600);
+    --color-text-inverse:      var(--slate-900);
+
+    /* 边框 */
+    --color-border-default:  var(--slate-700);
+    --color-border-strong:   var(--slate-600);
+    --color-border-brand:    var(--teal-400);
+
+    /* 主品牌色 */
+    --color-brand-default:  var(--teal-400);
+    --color-brand-hover:    var(--teal-300);
+    --color-brand-active:   var(--teal-500);
+    --color-brand-subtle:   var(--teal-950);
+    --color-brand-muted:    var(--teal-900);
+
+    /* 语义状态色 */
+    --color-success:          var(--mint-400);
+    --color-success-subtle:   var(--mint-900);
+    --color-success-text:     var(--mint-400);
+
+    --color-warning:          var(--amber-400);
+    --color-warning-subtle:   var(--amber-900);
+    --color-warning-text:     var(--amber-400);
+
+    --color-danger:           var(--rose-400);
+    --color-danger-subtle:    var(--rose-900);
+    --color-danger-text:      var(--rose-400);
+
+    --color-info:             var(--sky-400);
+    --color-info-subtle:      var(--sky-900);
+
+    /* 阴影 */
+    --shadow-xs:     0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-sm:     0 2px 4px rgba(0, 0, 0, 0.5);
+    --shadow-md:     0 4px 12px rgba(0, 0, 0, 0.6);
+    --shadow-lg:     0 12px 32px rgba(0, 0, 0, 0.7);
+    --shadow-focus:  0 0 0 3px rgba(45, 212, 191, 0.32);
+  }
+}
+
+/* ----------------------------------------------------------------------------
+ * 4. 字体系统
+ * ---------------------------------------------------------------------------- */
+:root {
+  /* 字体族 */
+  --font-sans:
+    "Inter",
+    "PingFang SC",
+    "Microsoft YaHei UI",
+    "Noto Sans SC",
+    -apple-system,
+    BlinkMacSystemFont,
+    "SF Pro Text",
+    "Segoe UI Variable",
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+
+  --font-mono:
+    "JetBrains Mono",
+    "SF Mono",
+    "Menlo",
+    "Cascadia Code",
+    "Consolas",
+    monospace;
+
+  /* 字号 · size / line-height / weight */
+  --text-display-size:     32px;
+  --text-display-line:     40px;
+  --text-display-weight:   600;
+
+  --text-h1-size:          24px;
+  --text-h1-line:          32px;
+  --text-h1-weight:        600;
+
+  --text-h2-size:          20px;
+  --text-h2-line:          28px;
+  --text-h2-weight:        600;
+
+  --text-h3-size:          16px;
+  --text-h3-line:          24px;
+  --text-h3-weight:        600;
+
+  --text-body-lg-size:     16px;
+  --text-body-lg-line:     24px;
+  --text-body-lg-weight:   400;
+
+  --text-body-size:        14px;
+  --text-body-line:        22px;
+  --text-body-weight:      400;
+
+  --text-body-sm-size:     13px;
+  --text-body-sm-line:     20px;
+  --text-body-sm-weight:   400;
+
+  --text-caption-size:     12px;
+  --text-caption-line:     18px;
+  --text-caption-weight:   400;
+
+  --text-code-size:        13px;
+  --text-code-line:        20px;
+  --text-code-weight:      400;
+
+  --text-label-size:       12px;
+  --text-label-line:       16px;
+  --text-label-weight:     500;
+
+  --text-button-size:      14px;
+  --text-button-line:      20px;
+  --text-button-weight:    500;
+}
+
+/* ----------------------------------------------------------------------------
+ * 5. 间距（4px 栅格）
+ * ---------------------------------------------------------------------------- */
+:root {
+  --space-0:   0;
+  --space-1:   4px;
+  --space-2:   8px;
+  --space-3:   12px;
+  --space-4:   16px;
+  --space-5:   20px;
+  --space-6:   24px;
+  --space-8:   32px;
+  --space-10:  40px;
+  --space-12:  48px;
+  --space-16:  64px;
+}
+
+/* ----------------------------------------------------------------------------
+ * 6. 圆角
+ * ---------------------------------------------------------------------------- */
+:root {
+  --radius-none:  0;
+  --radius-sm:    4px;
+  --radius-md:    8px;
+  --radius-lg:    12px;
+  --radius-xl:    16px;
+  --radius-2xl:   20px;
+  --radius-full:  9999px;
+}
+
+/* ----------------------------------------------------------------------------
+ * 7. 动效
+ * ---------------------------------------------------------------------------- */
+:root {
+  --duration-instant:  80ms;
+  --duration-fast:     160ms;
+  --duration-normal:   240ms;
+  --duration-slow:     400ms;
+  --duration-sync:     640ms;
+
+  --easing-standard:  cubic-bezier(0.2, 0, 0, 1);
+  --easing-exit:      cubic-bezier(0.4, 0, 1, 1);
+  --easing-sync:      cubic-bezier(0.33, 1, 0.68, 1);
+}
+
+/* 尊重系统减少动画偏好 */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-instant:  0ms;
+    --duration-fast:     0ms;
+    --duration-normal:   0ms;
+    --duration-slow:     0ms;
+    --duration-sync:     0ms;
+  }
+}
+
+/* ----------------------------------------------------------------------------
+ * 8. Z-Index 层级（避免随意数字）
+ * ---------------------------------------------------------------------------- */
+:root {
+  --z-base:       0;
+  --z-dropdown:   10;
+  --z-sticky:     20;
+  --z-overlay:    30;
+  --z-modal:      40;
+  --z-popover:    50;
+  --z-toast:      60;
+  --z-tooltip:    70;
+}
+
+/* ----------------------------------------------------------------------------
+ * 9. 通用基础样式（应用级）
+ * ---------------------------------------------------------------------------- */
+html {
+  font-family: var(--font-sans);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-line);
+  color: var(--color-text-primary);
+  background: var(--color-bg-canvas);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "cv11", "ss01", "ss03";  /* Inter 的优化特性 */
+}
+
+/* 数字等宽（用于表格、hash、版本号） */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 等宽字体（用于路径、代码、hash） */
+.font-mono {
+  font-family: var(--font-mono);
+}

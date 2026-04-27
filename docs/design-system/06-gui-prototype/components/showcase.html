@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>组件 Showcase · aitools</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="../../tokens.css" />
+    <link rel="stylesheet" href="../../components.css" />
+    <script src="../scripts/app.js" defer></script>
+  </head>
+  <body>
+    <main style="max-width: 1040px; margin: 0 auto; padding: var(--space-10) var(--space-8);">
+
+      <header style="display:flex; justify-content: space-between; align-items: center; margin-bottom: var(--space-10);">
+        <div>
+          <h1 style="margin:0 0 var(--space-1); font-size: var(--text-h1-size); font-weight: var(--text-h1-weight);">组件 Showcase</h1>
+          <p style="margin:0; color: var(--color-text-secondary);">L5 所有组件的活文档。任何新页面只能用这里定义过的组件。</p>
+        </div>
+        <div style="display:flex; gap: var(--space-3);">
+          <a class="btn btn--secondary" href="../pages/dashboard.html">返回原型</a>
+          <button class="btn btn--ghost btn--icon" data-theme-toggle aria-label="切换主题">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          </button>
+        </div>
+      </header>
+
+      <!-- ====== 1. Button ====== -->
+      <section class="page-section" style="margin-top:0;">
+        <div class="page-section__header"><h2 class="page-section__title">1 · Button 按钮</h2></div>
+        <article class="card">
+          <h3 style="margin:0 0 var(--space-3); font-size: var(--text-h3-size);">变体</h3>
+          <div style="display:flex; flex-wrap: wrap; gap: var(--space-3); margin-bottom: var(--space-6);">
+            <button class="btn btn--primary">Primary 主</button>
+            <button class="btn btn--secondary">Secondary 次</button>
+            <button class="btn btn--ghost">Ghost 幽灵</button>
+            <button class="btn btn--danger">Danger 危险</button>
+          </div>
+
+          <h3 style="margin:0 0 var(--space-3); font-size: var(--text-h3-size);">尺寸</h3>
+          <div style="display:flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; margin-bottom: var(--space-6);">
+            <button class="btn btn--primary btn--sm">Small</button>
+            <button class="btn btn--primary">Medium 默认</button>
+            <button class="btn btn--primary btn--lg">Large</button>
+          </div>
+
+          <h3 style="margin:0 0 var(--space-3); font-size: var(--text-h3-size);">状态</h3>
+          <div style="display:flex; flex-wrap: wrap; gap: var(--space-3); margin-bottom: var(--space-6);">
+            <button class="btn btn--primary">Default</button>
+            <button class="btn btn--primary" disabled>Disabled</button>
+            <button class="btn btn--primary" aria-busy="true" disabled>
+              <svg class="btn__icon btn__icon--spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+              同步中…
+            </button>
+          </div>
+
+          <h3 style="margin:0 0 var(--space-3); font-size: var(--text-h3-size);">图标按钮</h3>
+          <div style="display:flex; gap: var(--space-3);">
+            <button class="btn btn--ghost btn--icon" aria-label="更多">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+            </button>
+            <button class="btn btn--secondary btn--icon" aria-label="刷新">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/></svg>
+            </button>
+          </div>
+        </article>
+      </section>
+
+      <!-- ====== 2. StatusBadge ====== -->
+      <section class="page-section">
+        <div class="page-section__header"><h2 class="page-section__title">2 · StatusBadge 状态徽章 ⭐</h2></div>
+        <article class="card">
+          <div style="display:flex; flex-wrap: wrap; gap: var(--space-3); margin-bottom: var(--space-4);">
+            <span class="badge badge--success"><span class="badge__dot"></span>已同步</span>
+            <span class="badge badge--warning"><span class="badge__dot"></span>需更新</span>
+            <span class="badge badge--danger"><span class="badge__dot"></span>同步失败</span>
+            <span class="badge badge--neutral"><span class="badge__dot"></span>未同步</span>
+            <span class="badge badge--loading"><span class="badge__dot badge__dot--pulse"></span>同步中…</span>
+          </div>
+          <div style="display:flex; flex-wrap: wrap; gap: var(--space-3);">
+            <span class="badge badge--success badge--sm"><span class="badge__dot"></span>已同步</span>
+            <span class="badge badge--warning badge--sm"><span class="badge__dot"></span>需更新</span>
+          </div>
+        </article>
+      </section>
+
+      <!-- ====== 3. HeroCard ====== -->
+      <section class="page-section">
+        <div class="page-section__header"><h2 class="page-section__title">3 · HeroCard 状态 Hero 卡 ⭐</h2></div>
+        <div class="card-stack">
+          <section class="hero-card hero-card--success">
+            <div class="hero-card__bar"></div>
+            <div class="hero-card__content">
+              <div class="hero-card__main">
+                <svg class="hero-card__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                <h2 class="hero-card__title">全部最新</h2>
+              </div>
+              <p class="hero-card__sub tabular-nums">2 个工具 · 12 个 Skill · 刚刚同步</p>
+            </div>
+          </section>
+
+          <section class="hero-card hero-card--warning">
+            <div class="hero-card__bar"></div>
+            <div class="hero-card__content">
+              <div class="hero-card__main">
+                <svg class="hero-card__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                <h2 class="hero-card__title">3 个 Skill 需更新</h2>
+              </div>
+              <p class="hero-card__sub">分布在 2 个工具 · 点击查看差异</p>
+            </div>
+          </section>
+
+          <section class="hero-card hero-card--syncing">
+            <div class="hero-card__bar"></div>
+            <div class="hero-card__content">
+              <div class="hero-card__main">
+                <svg class="hero-card__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                <h2 class="hero-card__title">同步中…（2 / 3）</h2>
+              </div>
+              <p class="hero-card__sub tabular-nums">预计还需 3 秒</p>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <!-- ====== 4. Card ====== -->
+      <section class="page-section">
+        <div class="page-section__header"><h2 class="page-section__title">4 · Card 卡片</h2></div>
+        <div class="card-grid">
+          <article class="card">
+            <header class="card__header">
+              <h3 class="card__title">默认卡片</h3>
+            </header>
+            <p class="card__desc">不可交互的纯信息容器。</p>
+          </article>
+
+          <article class="card card--interactive">
+            <header class="card__header">
+              <h3 class="card__title">可交互卡片</h3>
+              <button class="btn btn--ghost btn--icon btn--sm" aria-label="更多" onclick="event.stopPropagation()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+              </button>
+            </header>
+            <p class="card__desc">Hover 时有阴影与边框变化。</p>
+          </article>
+
+          <article class="card card--selected">
+            <header class="card__header">
+              <h3 class="card__title">选中状态</h3>
+            </header>
+            <p class="card__desc">带品牌色边框与焦点光晕。</p>
+          </article>
+        </div>
+      </section>
+
+      <!-- ====== 5. Input ====== -->
+      <section class="page-section">
+        <div class="page-section__header"><h2 class="page-section__title">5 · Input 输入框</h2></div>
+        <article class="card">
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap: var(--space-4);">
+            <div>
+              <label style="display:block; font-size: var(--text-label-size); font-weight: 500; margin-bottom: var(--space-2);">默认</label>
+              <input class="input" type="text" placeholder="请输入…" />
+            </div>
+            <div>
+              <label style="display:block; font-size: var(--text-label-size); font-weight: 500; margin-bottom: var(--space-2);">带图标 + 快捷键</label>
+              <div class="input-group">
+                <svg class="input-group__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input class="input" type="search" placeholder="搜索 Skill…" />
+                <kbd class="input-group__kbd">⌘K</kbd>
+              </div>
+            </div>
+            <div>
+              <label style="display:block; font-size: var(--text-label-size); font-weight: 500; margin-bottom: var(--space-2);">错误态</label>
+              <input class="input input--error" type="text" value="~/wrong/path" aria-invalid="true" />
+              <p class="input__error" role="alert">路径不存在：~/wrong/path。检查路径</p>
+            </div>
+            <div>
+              <label style="display:block; font-size: var(--text-label-size); font-weight: 500; margin-bottom: var(--space-2);">禁用</label>
+              <input class="input" type="text" value="~/.aitools/" disabled />
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <!-- ====== 6. Tag ====== -->
+      <section class="page-section">
+        <div class="page-section__header"><h2 class="page-section__title">6 · Tag 标签</h2></div>
+        <article class="card">
+          <div style="display:flex; gap: var(--space-2);">
+            <span class="tag">Skill</span>
+            <span class="tag">Agent</span>
+            <span class="tag tag--neutral">User</span>
+            <span class="tag tag--neutral">Project</span>
+          </div>
+        </article>
+      </section>
+
+      <!-- ====== 7. Tabs ====== -->
+      <section class="page-section">
+        <div class="page-section__header"><h2 class="page-section__title">7 · Tabs 标签页</h2></div>
+        <article class="card">
+          <div class="tabs" role="tablist" data-tabs="showcase">
+            <button class="tabs__tab tabs__tab--active" role="tab" aria-selected="true" data-tab="tab1">内容</button>
+            <button class="tabs__tab" role="tab" aria-selected="false" data-tab="tab2">同步目标</button>
+            <button class="tabs__tab" role="tab" aria-selected="false" data-tab="tab3">历史</button>
+          </div>
+          <div class="tabs__panel" role="tabpanel" data-tab-panel="showcase" data-panel="tab1">
+            <p style="color: var(--color-text-secondary);">这是内容标签页的内容。</p>
+          </div>
+          <div class="tabs__panel" role="tabpanel" data-tab-panel="showcase" data-panel="tab2" hidden>
+            <p style="color: var(--color-text-secondary);">这是同步目标标签页的内容。</p>
+          </div>
+          <div class="tabs__panel" role="tabpanel" data-tab-panel="showcase" data-panel="tab3" hidden>
+            <p style="color: var(--color-text-secondary);">这是历史标签页的内容。</p>
+          </div>
+        </article>
+      </section>
+
+      <!-- ====== 8. Modal ====== -->
+      <section class="page-section">
+        <div class="page-section__header"><h2 class="page-section__title">8 · Modal 弹窗</h2></div>
+        <article class="card">
+          <div style="display:flex; gap: var(--space-3);">
+            <button class="btn btn--secondary" data-open-modal="demoModal">打开标准 Modal</button>
+            <button class="btn btn--danger" data-open-modal="demoDangerModal">打开危险确认</button>
+          </div>
+        </article>
+      </section>
+
+      <!-- ====== 9. Toast ====== -->
+      <section class="page-section">
+        <div class="page-section__header"><h2 class="page-section__title">9 · Toast 轻提示</h2></div>
+        <article class="card">
+          <div style="display:flex; gap: var(--space-3); flex-wrap: wrap;">
+            <button class="btn btn--secondary" onclick="showToast({title:'已同步',desc:'同步到 2 个工具',variant:'success'})">Success</button>
+            <button class="btn btn--secondary" onclick="showToast({title:'3 个 Skill 需更新',desc:'点击工作台查看',variant:'warning'})">Warning</button>
+            <button class="btn btn--secondary" onclick="showToast({title:'同步失败',desc:'CodeBuddy 路径不存在：~/.codebuddy/',variant:'danger',persist:true})">Danger</button>
+            <button class="btn btn--secondary" onclick="showToast({title:'检查更新中…',variant:'info'})">Info</button>
+          </div>
+        </article>
+      </section>
+
+      <!-- ====== 10. EmptyState ====== -->
+      <section class="page-section">
+        <div class="page-section__header"><h2 class="page-section__title">10 · EmptyState 空状态</h2></div>
+        <article class="card">
+          <div class="empty-state">
+            <svg class="empty-state__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.27 6.96 12 12.01l8.73-5.05"/><path d="M12 22.08V12"/></svg>
+            <h3 class="empty-state__title">抽屉是空的</h3>
+            <p class="empty-state__desc">导入第一个 Skill 开始。</p>
+            <button class="btn btn--primary">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="width:16px;height:16px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              导入文件夹
+            </button>
+          </div>
+        </article>
+      </section>
+
+      <!-- ====== 11. ListRow ====== -->
+      <section class="page-section">
+        <div class="page-section__header"><h2 class="page-section__title">11 · ListRow 列表行</h2></div>
+        <article class="card" style="padding: 0;">
+          <table class="list-table">
+            <thead>
+              <tr>
+                <th style="padding-left: var(--space-6);">名称</th>
+                <th>类型</th>
+                <th>更新时间</th>
+                <th>状态</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="list-row">
+                <td style="padding-left: var(--space-6); font-weight: 500;">code-review</td>
+                <td><span class="tag">Skill</span></td>
+                <td class="tabular-nums">2h ago</td>
+                <td><span class="badge badge--success"><span class="badge__dot"></span>已同步</span></td>
+                <td><button class="btn btn--ghost btn--icon btn--sm" aria-label="更多">···</button></td>
+              </tr>
+              <tr class="list-row list-row--selected">
+                <td style="padding-left: var(--space-6); font-weight: 500;">git-workflow</td>
+                <td><span class="tag">Skill</span></td>
+                <td class="tabular-nums">10m ago</td>
+                <td><span class="badge badge--warning"><span class="badge__dot"></span>需更新</span></td>
+                <td><button class="btn btn--ghost btn--icon btn--sm" aria-label="更多">···</button></td>
+              </tr>
+              <tr class="list-row">
+                <td style="padding-left: var(--space-6); font-weight: 500;">api-designer</td>
+                <td><span class="tag">Skill</span></td>
+                <td class="tabular-nums">3d ago</td>
+                <td><span class="badge badge--danger"><span class="badge__dot"></span>失败</span></td>
+                <td><button class="btn btn--ghost btn--icon btn--sm" aria-label="更多">···</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </article>
+      </section>
+
+      <!-- ====== 12. Sidebar 预览 ====== -->
+      <section class="page-section">
+        <div class="page-section__header"><h2 class="page-section__title">12 · Sidebar 侧栏</h2></div>
+        <p style="margin:0 0 var(--space-4); color: var(--color-text-secondary);">见各页面左侧实际效果，此处不重复展示。</p>
+      </section>
+
+      <div style="margin-top: var(--space-16); text-align:center; color: var(--color-text-tertiary); font-size: var(--text-body-sm-size);">
+        ~ 所有组件均使用 <span class="font-mono">tokens.css</span> + <span class="font-mono">components.css</span> 实现 ~
+      </div>
+    </main>
+
+    <!-- ====== Modal 示例 ====== -->
+    <div class="modal-overlay" id="demoModal" hidden role="dialog" aria-modal="true" aria-labelledby="demoModalTitle">
+      <div class="modal modal--md">
+        <header class="modal__header">
+          <h2 class="modal__title" id="demoModalTitle">同步 3 个 Skill</h2>
+          <button class="btn btn--ghost btn--icon" aria-label="关闭" data-close-modal>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="width:18px;height:18px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </header>
+        <div class="modal__body">
+          <p style="margin: 0 0 var(--space-4);">以下 3 个 Skill 将被同步到 CodeBuddy 和 Claude Code：</p>
+          <ul style="padding-left: var(--space-5); color: var(--color-text-secondary); line-height: 2;">
+            <li>code-review (2.4 KB)</li>
+            <li>git-workflow (1.8 KB)</li>
+            <li>ts-expert (3.1 KB)</li>
+          </ul>
+        </div>
+        <footer class="modal__footer">
+          <button class="btn btn--secondary" data-close-modal>取消</button>
+          <button class="btn btn--primary" data-close-modal onclick="showToast({title:'同步完成',desc:'3 个 Skill 已送达',variant:'success'})">开始同步</button>
+        </footer>
+      </div>
+    </div>
+
+    <div class="modal-overlay" id="demoDangerModal" hidden role="dialog" aria-modal="true" aria-labelledby="demoDangerTitle">
+      <div class="modal modal--xs">
+        <header class="modal__header">
+          <h2 class="modal__title" id="demoDangerTitle">删除 Skill</h2>
+          <button class="btn btn--ghost btn--icon" aria-label="关闭" data-close-modal>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="width:18px;height:18px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </header>
+        <div class="modal__body">
+          <p style="margin: 0;">将从源目录彻底删除 <strong>code-review</strong>，并从所有已同步的工具中移除。此操作无法撤销。</p>
+        </div>
+        <footer class="modal__footer">
+          <button class="btn btn--secondary" data-close-modal>取消</button>
+          <button class="btn btn--danger" data-close-modal onclick="showToast({title:'code-review 已删除',variant:'info'})">删除</button>
+        </footer>
+      </div>
+    </div>
+  </body>
+</html>
