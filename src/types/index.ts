@@ -186,6 +186,138 @@ export interface SkillListItem {
 }
 
 /* ============================================================
+ * JSON 输出协议（v0.3.0 新增）
+ * --json 模式下通过 stdout 以 NDJSON（每行一个 JSON）方式输出事件
+ * 面向 GUI 等机器消费方，保证稳定的数据契约
+ * ============================================================ */
+
+/**
+ * 单个资源在 list 命令 JSON 输出中的条目
+ */
+export interface ResourceListItem {
+  /** 资源显示名称（frontmatter 中的 name 或文件夹名） */
+  name: string;
+  /** 资源文件夹名（同步时的 key） */
+  dirName: string;
+  /** 资源描述（可能为 '-'） */
+  description: string;
+  /** 资源所属层级 */
+  scope: ResourceScope;
+  /** 资源文件夹的绝对路径 */
+  path: string;
+  /** 源目录 hash（SHA-256，完整 64 位；前 8 位用于人类展示） */
+  sourceHash: string;
+  /** 各目标的同步状态 */
+  targets: {
+    /** 目标工具名称（如 codebuddy） */
+    name: string;
+    /** 在该目标中的同步状态 */
+    status: SkillSyncStatus;
+    /** 目标中的资源目录路径（若不存在则为 null） */
+    targetPath: string;
+  }[];
+}
+
+/**
+ * list 命令 JSON 输出的 data 载荷
+ */
+export interface ListEventData {
+  /** 资源类型 */
+  type: ResourceType;
+  /** 资源层级：user / project */
+  scope: ResourceScope;
+  /** 该层级下所有资源及其同步状态 */
+  resources: ResourceListItem[];
+  /** 已启用目标列表（帮助 GUI 建立列头） */
+  enabledTargets: string[];
+}
+
+/**
+ * sync 命令流式事件类型枚举
+ */
+export type SyncEventType = 'start' | 'progress' | 'summary' | 'done' | 'error';
+
+/**
+ * start 事件载荷：同步任务开始
+ */
+export interface SyncStartData {
+  /** 资源类型 */
+  type: ResourceType;
+  /** 层级：user / project */
+  scope: ResourceScope;
+  /** 本次将要处理的资源总数（resource × target 的总次数） */
+  total: number;
+  /** 参与的目标列表 */
+  targets: string[];
+}
+
+/**
+ * progress 事件载荷：每完成一个"资源 × 目标"项时触发
+ */
+export interface SyncProgressData {
+  /** 资源名（文件夹名） */
+  resource: string;
+  /** 目标工具名 */
+  target: string;
+  /** 层级 */
+  scope: ResourceScope;
+  /** 动作：created / updated / skipped / failed */
+  action: 'created' | 'updated' | 'skipped' | 'failed';
+  /** 当前进度（1-based） */
+  index: number;
+  /** 总任务数 */
+  total: number;
+  /** 若 action === 'failed'，此处给出原因 */
+  error?: string;
+}
+
+/**
+ * summary 事件载荷：一次完整 sync 的汇总结果
+ */
+export interface SyncSummaryData extends SyncSummary {
+  /** 资源类型 */
+  type: ResourceType;
+  /** 层级 */
+  scope: ResourceScope;
+}
+
+/**
+ * done 事件载荷：整个 CLI 调用结束
+ */
+export interface SyncDoneData {
+  /** 进程退出码（0 = 成功） */
+  exitCode: number;
+}
+
+/**
+ * error 事件载荷：CLI 级错误（非单个资源失败）
+ */
+export interface ErrorEventData {
+  /** 错误消息（人类可读） */
+  message: string;
+  /** 错误码（机器可读，可选） */
+  code?: string;
+}
+
+/**
+ * 所有 JSON 事件的联合类型
+ * 每个事件会作为单行 JSON 写入 stdout
+ */
+export type JsonEvent =
+  | { event: 'list'; data: ListEventData }
+  | { event: 'start'; data: SyncStartData }
+  | { event: 'progress'; data: SyncProgressData }
+  | { event: 'summary'; data: SyncSummaryData }
+  | { event: 'done'; data: SyncDoneData }
+  | { event: 'error'; data: ErrorEventData };
+
+/**
+ * 同步进度回调
+ * 由同步引擎在每完成一个"资源 × 目标"任务时触发
+ */
+export type SyncProgressCallback = (event: SyncProgressData) => void;
+
+/* ============================================================
  * 项目配置类型（v0.2.0 破坏性变更：按资源类型分组）
  * ============================================================ */
 

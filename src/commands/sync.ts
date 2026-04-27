@@ -1,9 +1,12 @@
 /**
  * sync 命令处理模块
  * v0.2.0：按资源类型分发（skills/commands/agents/rules/all）
+ * v0.3.0：支持 --json 流式输出（NDJSON）：start / progress / summary / done 四类事件
  * 支持子命令参数（aitools sync skills）与 --type 简写两种用法
  */
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
+import path from 'node:path';
 import pc from 'picocolors';
 import { loadConfig, expandTilde } from '../config/manager.js';
 import { syncAllResources, syncProjectResources } from '../core/syncer.js';
@@ -20,10 +23,13 @@ import {
   listAllTypes,
 } from '../core/resources/registry.js';
 import { logger } from '../utils/logger.js';
+import { reporter, isJsonMode, emitJson } from '../utils/reporter.js';
 import type {
   Config,
   ResourceInfo,
+  ResourceScope,
   ResourceType,
+  SyncProgressCallback,
   SyncSummary,
 } from '../types/index.js';
 
@@ -73,10 +79,16 @@ function parseResourceType(type: string): ResourceType | 'all' | null {
 
 /**
  * 打印同步结果摘要
+ * JSON 模式下不打印（GUI 从 progress/summary 事件中自行汇总展示）
  * @param summary 同步结果摘要对象
  * @param label 摘要标签（如 "用户级" 或 "项目级"）
  */
 function printSyncResults(summary: SyncSummary, label: string): void {
+  if (isJsonMode()) {
+    /* JSON 模式不输出彩色文本，GUI 已从事件流拿到数据 */
+    return;
+  }
+
   /* 输出每个资源的同步结果 */
   for (const result of summary.results) {
     const targetNames = result.targetResults
@@ -130,6 +142,62 @@ function printSyncResults(summary: SyncSummary, label: string): void {
 }
 
 /**
+ * 构造 onProgress 回调，将进度事件直接 emit 到 stdout（JSON 模式）
+ * @returns 回调函数；human 模式下返回 undefined（syncer 将不触发 onProgress）
+ */
+function makeProgressCallback(): SyncProgressCallback | undefined {
+  if (!isJsonMode()) {
+    return undefined;
+  }
+  return (event) => {
+    emitJson({ event: 'progress', data: event });
+  };
+}
+
+/**
+ * 在 JSON 模式下 emit start 事件（任务开始，告知总数与目标列表）
+ * @param type 资源类型
+ * @param scope 层级
+ * @param resources 参与同步的资源
+ * @param targets 参与的目标名列表（已过滤）
+ */
+function emitStartEvent(
+  type: ResourceType,
+  scope: ResourceScope,
+  resources: ResourceInfo[],
+  targets: string[],
+): void {
+  if (!isJsonMode()) return;
+  emitJson({
+    event: 'start',
+    data: {
+      type,
+      scope,
+      total: resources.length * targets.length,
+      targets,
+    },
+  });
+}
+
+/**
+ * 在 JSON 模式下 emit summary 事件（单次 sync 的汇总结果）
+ * @param type 资源类型
+ * @param scope 层级
+ * @param summary 汇总结果
+ */
+function emitSummaryEvent(
+  type: ResourceType,
+  scope: ResourceScope,
+  summary: SyncSummary,
+): void {
+  if (!isJsonMode()) return;
+  emitJson({
+    event: 'summary',
+    data: { ...summary, type, scope },
+  });
+}
+
+/**
  * 同步指定资源类型的用户级 + 智能检测项目级
  * 这是针对单一资源类型的完整流程入口
  * @param type 资源类型
@@ -145,7 +213,7 @@ async function syncOneType(
 
   /* 未实现类型：输出占位提示后返回 */
   if (!handler.implemented) {
-    logger.warn(`[${type}] 暂未支持，敬请期待`);
+    reporter.warn(`[${type}] 暂未支持，敬请期待`);
     return;
   }
 
@@ -165,23 +233,29 @@ async function syncOneType(
       userList.find((r) => r.dirName === resourceName);
 
     if (!matched) {
-      logger.error(`[${type}] 资源 '${resourceName}' 不存在于源目录中`);
-      logger.info(`   查找位置: ${sourceDir}/${handler.resourceDirName}/{user,project}/`);
+      reporter.error(`[${type}] 资源 '${resourceName}' 不存在于源目录中`);
+      reporter.info(
+        `   查找位置: ${sourceDir}/${handler.resourceDirName}/{user,project}/`,
+      );
       const available = [...projectList, ...userList].map((r) => r.dirName);
       if (available.length > 0) {
-        logger.info(`   可用资源: ${available.join(', ')}`);
+        reporter.info(`   可用资源: ${available.join(', ')}`);
       }
       return;
     }
 
     /* 添加到项目配置（自动去重） */
     await addResourceToProject(projectDir, type, resourceName);
-    logger.success(`[${type}] 资源 '${resourceName}' 已关联到当前项目`);
+    reporter.success(`[${type}] 资源 '${resourceName}' 已关联到当前项目`);
 
     /* 执行项目级同步（仅同步该资源） */
-    console.log('');
-    logger.info(`🔄 [${type}] 正在同步项目级资源: ${resourceName}...`);
-    console.log('');
+    reporter.blank();
+    reporter.info(`🔄 [${type}] 正在同步项目级资源: ${resourceName}...`);
+    reporter.blank();
+
+    /* 计算参与目标（用于 start 事件） */
+    const projectTargetsForEvent = computeProjectTargets(config, projectDir, targetFilter);
+    emitStartEvent(type, 'project', [matched], projectTargetsForEvent);
 
     const summary = await syncProjectResources(
       [matched],
@@ -189,8 +263,10 @@ async function syncOneType(
       projectDir,
       type,
       targetFilter,
+      makeProgressCallback(),
     );
     printSyncResults(summary, `[${type}] 项目级`);
+    emitSummaryEvent(type, 'project', summary);
     return;
   }
 
@@ -198,7 +274,7 @@ async function syncOneType(
   if (options.scope === 'project') {
     const hasProjectConfig = await projectConfigExists(projectDir);
     if (!hasProjectConfig) {
-      logger.error(
+      reporter.error(
         `[${type}] 当前目录未关联任何资源，请使用 --skill <name> 添加`,
       );
       return;
@@ -206,13 +282,13 @@ async function syncOneType(
 
     const projectConfig = await loadProjectConfig(projectDir);
     if (!projectConfig) {
-      logger.info(`[${type}] 项目配置无效或为空`);
+      reporter.info(`[${type}] 项目配置无效或为空`);
       return;
     }
 
     const associated = getProjectResourceList(projectConfig, type);
     if (associated.length === 0) {
-      logger.info(`[${type}] 项目未关联任何 ${type} 资源`);
+      reporter.info(`[${type}] 项目未关联任何 ${type} 资源`);
       return;
     }
 
@@ -228,20 +304,23 @@ async function syncOneType(
       if (found) {
         matchedResources.push(found);
       } else {
-        logger.warn(`[${type}] 资源 '${name}' 在源目录中不存在，已跳过`);
+        reporter.warn(`[${type}] 资源 '${name}' 在源目录中不存在，已跳过`);
       }
     }
 
     if (matchedResources.length === 0) {
-      logger.info(`[${type}] 没有可同步的项目级资源`);
+      reporter.info(`[${type}] 没有可同步的项目级资源`);
       return;
     }
 
-    console.log('');
-    logger.info(
+    reporter.blank();
+    reporter.info(
       `🔄 [${type}] 正在同步项目级资源... (${matchedResources.length} 个)`,
     );
-    console.log('');
+    reporter.blank();
+
+    const projectTargetsForEvent = computeProjectTargets(config, projectDir, targetFilter);
+    emitStartEvent(type, 'project', matchedResources, projectTargetsForEvent);
 
     const summary = await syncProjectResources(
       matchedResources,
@@ -249,8 +328,10 @@ async function syncOneType(
       projectDir,
       type,
       targetFilter,
+      makeProgressCallback(),
     );
     printSyncResults(summary, `[${type}] 项目级`);
+    emitSummaryEvent(type, 'project', summary);
     return;
   }
 
@@ -258,32 +339,40 @@ async function syncOneType(
   const userResources = await handler.scan(sourceDir, 'user');
 
   if (userResources.length === 0) {
-    logger.info(
+    reporter.info(
       `[${type}] 源目录中没有发现任何用户级 ${type}（${sourceDir}/${handler.resourceDirName}/user/）`,
     );
   } else {
     /* 检查是否有已启用的目标 */
     const enabledTargets = config.targets.filter((t) => t.enabled);
     if (enabledTargets.length === 0) {
-      logger.error(
+      reporter.error(
         `[${type}] 没有已启用的同步目标，请检查配置或运行 aitools init`,
       );
       return;
     }
 
-    console.log('');
-    logger.info(
+    reporter.blank();
+    reporter.info(
       `🔄 [${type}] 正在同步用户级资源... (${userResources.length} 个)`,
     );
-    console.log('');
+    reporter.blank();
+
+    /* 计算参与的目标（用于 start 事件） */
+    const userTargetsForEvent = targetFilter
+      ? enabledTargets.filter((t) => t.name === targetFilter).map((t) => t.name)
+      : enabledTargets.map((t) => t.name);
+    emitStartEvent(type, 'user', userResources, userTargetsForEvent);
 
     const userSummary = await syncAllResources(
       userResources,
       config,
       type,
       targetFilter,
+      makeProgressCallback(),
     );
     printSyncResults(userSummary, `[${type}] 用户级`);
+    emitSummaryEvent(type, 'user', userSummary);
   }
 
   /* 如果 scope 显式为 user，不检测项目级 */
@@ -317,7 +406,7 @@ async function syncOneType(
     if (found) {
       matchedResources.push(found);
     } else {
-      logger.warn(`[${type}] 资源 '${name}' 在源目录中不存在，已跳过`);
+      reporter.warn(`[${type}] 资源 '${name}' 在源目录中不存在，已跳过`);
     }
   }
 
@@ -325,11 +414,14 @@ async function syncOneType(
     return;
   }
 
-  console.log('');
-  logger.info(
+  reporter.blank();
+  reporter.info(
     `🔄 [${type}] 正在同步项目级资源... (${matchedResources.length} 个)`,
   );
-  console.log('');
+  reporter.blank();
+
+  const projectTargetsForEvent = computeProjectTargets(config, projectDir, targetFilter);
+  emitStartEvent(type, 'project', matchedResources, projectTargetsForEvent);
 
   const projectSummary = await syncProjectResources(
     matchedResources,
@@ -337,8 +429,32 @@ async function syncOneType(
     projectDir,
     type,
     targetFilter,
+    makeProgressCallback(),
   );
   printSyncResults(projectSummary, `[${type}] 项目级`);
+  emitSummaryEvent(type, 'project', projectSummary);
+}
+
+/**
+ * 计算项目级同步时实际参与的目标名列表（用于 start 事件）
+ * 逻辑对齐 syncProjectResources 内部的筛选策略：
+ * - 若有 targetFilter，优先
+ * - 否则按"项目目录是否存在 .<targetName>/"检测
+ * - 都检测不到时回退到全部已启用目标（GUI 场景下通常会由 GUI 主动传 targetFilter）
+ */
+function computeProjectTargets(
+  config: Config,
+  projectDir: string,
+  targetFilter?: string,
+): string[] {
+  const enabled = config.targets.filter((t) => t.enabled);
+  if (targetFilter) {
+    return enabled.filter((t) => t.name === targetFilter).map((t) => t.name);
+  }
+  const detected = enabled.filter((t) =>
+    fsSync.existsSync(path.join(projectDir, `.${t.name}`)),
+  );
+  return (detected.length > 0 ? detected : enabled).map((t) => t.name);
 }
 
 /**
@@ -354,6 +470,9 @@ export async function syncCommand(
   /* 读取全局配置文件 */
   const config = await loadConfig();
   if (!config) {
+    if (isJsonMode()) {
+      emitJson({ event: 'done', data: { exitCode: 1 } });
+    }
     return;
   }
 
@@ -364,11 +483,17 @@ export async function syncCommand(
   try {
     const stat = await fs.stat(sourceDir);
     if (!stat.isDirectory()) {
-      logger.error(`源路径不是目录: ${config.source}`);
+      reporter.error(`源路径不是目录: ${config.source}`);
+      if (isJsonMode()) {
+        emitJson({ event: 'done', data: { exitCode: 1 } });
+      }
       return;
     }
   } catch {
-    logger.error(`源目录不存在: ${config.source}`);
+    reporter.error(`源目录不存在: ${config.source}`);
+    if (isJsonMode()) {
+      emitJson({ event: 'done', data: { exitCode: 1 } });
+    }
     return;
   }
 
@@ -377,28 +502,42 @@ export async function syncCommand(
   const parsed = parseResourceType(resolved);
 
   if (parsed === null) {
-    logger.error(
+    reporter.error(
       `未知的资源类型: ${resolved}。可选值: ${['all', ...listAllTypes()].join(', ')}`,
     );
+    if (isJsonMode()) {
+      emitJson({ event: 'done', data: { exitCode: 1 } });
+    }
     return;
   }
 
   /* 单一资源类型 */
   if (parsed !== 'all') {
     await syncOneType(parsed, config, options);
+    if (isJsonMode()) {
+      emitJson({ event: 'done', data: { exitCode: 0 } });
+    }
     return;
   }
 
   /* all：遍历所有已实现的资源类型 */
   const implemented = listImplementedHandlers();
   if (implemented.length === 0) {
-    logger.warn('当前没有任何已实现的资源类型');
+    reporter.warn('当前没有任何已实现的资源类型');
+    if (isJsonMode()) {
+      emitJson({ event: 'done', data: { exitCode: 0 } });
+    }
     return;
   }
 
   /* 对于 all 场景，如果用户还传了 --skill，这是矛盾的（--skill 必须配合具体类型） */
   if (options.skill) {
-    logger.error('--skill 参数必须指定具体资源类型，例如: aitools sync skills --skill <name>');
+    reporter.error(
+      '--skill 参数必须指定具体资源类型，例如: aitools sync skills --skill <name>',
+    );
+    if (isJsonMode()) {
+      emitJson({ event: 'done', data: { exitCode: 1 } });
+    }
     return;
   }
 
@@ -409,7 +548,11 @@ export async function syncCommand(
   /* 对未实现类型输出一次汇总提示 */
   const pending = listAllTypes().filter((t) => !getHandler(t).implemented);
   if (pending.length > 0) {
-    console.log('');
-    logger.warn(`以下资源类型暂未支持同步：${pending.join(', ')}`);
+    reporter.blank();
+    reporter.warn(`以下资源类型暂未支持同步：${pending.join(', ')}`);
+  }
+
+  if (isJsonMode()) {
+    emitJson({ event: 'done', data: { exitCode: 0 } });
   }
 }

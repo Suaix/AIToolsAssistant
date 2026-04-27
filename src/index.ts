@@ -3,12 +3,14 @@
 /**
  * aitools CLI 入口文件
  * v0.2.0：支持多资源类型（skills/commands/agents/rules）
+ * v0.3.0：新增全局 --json flag（NDJSON 输出），为 GUI 等机器消费方提供稳定数据契约
  * 命令双模式：子命令参数（aitools sync skills）与 --type 简写
  */
 import { Command } from 'commander';
 import { initCommand } from './commands/init.js';
 import { syncCommand } from './commands/sync.js';
 import { listCommand } from './commands/list.js';
+import { setReporterMode } from './utils/reporter.js';
 
 /** 实例化命令行程序对象 */
 const program = new Command();
@@ -17,9 +19,31 @@ const program = new Command();
 program
   .name('aitools')
   .description('AI Agent 统一配置与资源同步管理工具（skills/commands/agents/rules）')
-  .version('0.2.0');
+  .version('0.3.0');
 
-/** 注册 init 初始化命令 */
+/**
+ * 全局 --json flag
+ * 作用：让所有子命令以 NDJSON 格式输出到 stdout（机器可读）
+ * 使用：aitools --json list / aitools --json sync skills
+ * 说明：init 命令不支持 --json（它本质上是交互式的，GUI 请直接写 ~/.aitools/config.yaml）
+ */
+program.option(
+  '--json',
+  '以 NDJSON（每行一个 JSON 对象）格式输出到 stdout，供 GUI 等机器消费方使用',
+);
+
+/**
+ * 在所有子命令执行前，根据全局 --json 设置 reporter 模式
+ * preAction 是 commander 的生命周期钩子，此时 opts() 已完成解析
+ */
+program.hook('preAction', (thisCommand) => {
+  const opts = thisCommand.opts();
+  if (opts.json) {
+    setReporterMode('json');
+  }
+});
+
+/** 注册 init 初始化命令（不支持 --json，保持交互式体验） */
 program
   .command('init')
   .description(

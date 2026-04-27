@@ -16,9 +16,11 @@ import type {
   Target,
   ResourceInfo,
   ResourceType,
+  ResourceScope,
   SkillSyncResult,
   SkillTargetSyncResult,
   SyncSummary,
+  SyncProgressCallback,
 } from '../types/index.js';
 
 /**
@@ -125,6 +127,7 @@ async function syncResourceToDir(
  * @param config 全局配置对象
  * @param type 资源类型
  * @param targetFilter 可选，指定单个目标名称进行过滤
+ * @param onProgress 可选，每完成一个"资源 × 目标"任务时触发的回调（用于 GUI 流式进度）
  * @returns 同步结果摘要
  */
 export async function syncAllResources(
@@ -132,6 +135,7 @@ export async function syncAllResources(
   config: Config,
   type: ResourceType,
   targetFilter?: string,
+  onProgress?: SyncProgressCallback,
 ): Promise<SyncSummary> {
   /* 筛选已启用的目标 */
   let targets = config.targets.filter((t) => t.enabled);
@@ -150,12 +154,18 @@ export async function syncAllResources(
   let updated = 0;
   let skipped = 0;
 
+  /* 计算总任务数（resource × target），用于 onProgress 的 index/total */
+  const totalTasks = resources.length * targets.length;
+  let currentIndex = 0;
+  const scope: ResourceScope = 'user';
+
   /* 遍历每个资源，同步到每个目标 */
   for (const resource of resources) {
     const targetResults: SkillTargetSyncResult[] = [];
 
     for (const target of targets) {
       const targetBaseDir = getUserTargetDir(target, type);
+      currentIndex++;
       try {
         const result = await syncResourceToDir(resource, targetBaseDir, target.name);
         targetResults.push(result);
@@ -167,11 +177,36 @@ export async function syncAllResources(
         } else {
           skipped++;
         }
+
+        /* 流式进度回调（GUI 消费） */
+        if (onProgress) {
+          onProgress({
+            resource: resource.dirName,
+            target: target.name,
+            scope,
+            action: result.action,
+            index: currentIndex,
+            total: totalTasks,
+          });
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         logger.error(`同步 ${resource.dirName} → ${target.name} 失败: ${message}`);
         targetResults.push({ targetName: target.name, action: 'skipped' });
         skipped++;
+
+        /* 失败也要触发 onProgress（action: 'failed'，附带 error 消息） */
+        if (onProgress) {
+          onProgress({
+            resource: resource.dirName,
+            target: target.name,
+            scope,
+            action: 'failed',
+            index: currentIndex,
+            total: totalTasks,
+            error: message,
+          });
+        }
       }
     }
 
@@ -230,6 +265,7 @@ export function detectProjectTools(
  * @param projectDir 项目根目录的绝对路径
  * @param type 资源类型
  * @param targetFilter 可选，指定单个目标名称进行过滤
+ * @param onProgress 可选，每完成一个"资源 × 目标"任务时触发的回调（用于 GUI 流式进度）
  * @returns 同步结果摘要
  */
 export async function syncProjectResources(
@@ -238,6 +274,7 @@ export async function syncProjectResources(
   projectDir: string,
   type: ResourceType,
   targetFilter?: string,
+  onProgress?: SyncProgressCallback,
 ): Promise<SyncSummary> {
   /* 筛选已启用的目标 */
   let targets = config.targets.filter((t) => t.enabled);
@@ -283,12 +320,18 @@ export async function syncProjectResources(
   let updated = 0;
   let skipped = 0;
 
+  /* 计算总任务数与进度计数器 */
+  const totalTasks = resources.length * targets.length;
+  let currentIndex = 0;
+  const scope: ResourceScope = 'project';
+
   /* 遍历每个资源，同步到每个目标的项目级目录 */
   for (const resource of resources) {
     const targetResults: SkillTargetSyncResult[] = [];
 
     for (const target of targets) {
       const targetBaseDir = getProjectTargetDir(projectDir, target.name, type);
+      currentIndex++;
       try {
         const result = await syncResourceToDir(resource, targetBaseDir, target.name);
         targetResults.push(result);
@@ -300,6 +343,18 @@ export async function syncProjectResources(
         } else {
           skipped++;
         }
+
+        /* 流式进度回调 */
+        if (onProgress) {
+          onProgress({
+            resource: resource.dirName,
+            target: target.name,
+            scope,
+            action: result.action,
+            index: currentIndex,
+            total: totalTasks,
+          });
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         logger.error(
@@ -307,6 +362,19 @@ export async function syncProjectResources(
         );
         targetResults.push({ targetName: target.name, action: 'skipped' });
         skipped++;
+
+        /* 失败也要触发 onProgress */
+        if (onProgress) {
+          onProgress({
+            resource: resource.dirName,
+            target: target.name,
+            scope,
+            action: 'failed',
+            index: currentIndex,
+            total: totalTasks,
+            error: message,
+          });
+        }
       }
     }
 
