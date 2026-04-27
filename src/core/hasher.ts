@@ -18,8 +18,30 @@ export async function hashFile(filePath: string): Promise<string> {
 }
 
 /**
+ * 需要在 hash 计算中忽略的文件名集合
+ * 这些文件由操作系统或文件管理器自动生成，不属于资源内容本身
+ * 如果不排除，会导致相同内容的目录因为这些元数据文件而产生不同的 hash
+ */
+const IGNORED_FILES = new Set([
+  '.DS_Store', /* macOS Finder 自动生成的目录元数据 */
+  'Thumbs.db', /* Windows 资源管理器自动生成的缩略图缓存 */
+  'desktop.ini', /* Windows 自定义文件夹显示设置 */
+]);
+
+/**
+ * 判断文件名是否应该在 hash 计算中被忽略
+ * 排除操作系统元数据文件和 macOS Apple Double（._xxx）资源分支文件
+ * @param fileName 文件名
+ * @returns 是否应忽略
+ */
+function shouldIgnore(fileName: string): boolean {
+  return IGNORED_FILES.has(fileName) || fileName.startsWith('._');
+}
+
+/**
  * 递归收集目录下的所有文件（相对路径），并按路径排序
  * 排序确保相同内容的目录总是产生相同的 hash
+ * 自动忽略操作系统生成的元数据文件（如 .DS_Store、._xxx 等）
  * @param dirPath 目录的绝对路径
  * @param basePath 用于计算相对路径的基础路径（默认为 dirPath 自身）
  * @returns 排序后的相对文件路径数组
@@ -30,6 +52,10 @@ async function collectFiles(dirPath: string, basePath?: string): Promise<string[
   const entries = await fs.readdir(dirPath, { withFileTypes: true });
 
   for (const entry of entries) {
+    /* 跳过操作系统自动生成的元数据文件 */
+    if (shouldIgnore(entry.name)) {
+      continue;
+    }
     const fullPath = path.join(dirPath, entry.name);
     if (entry.isDirectory()) {
       /* 递归收集子目录中的文件 */
