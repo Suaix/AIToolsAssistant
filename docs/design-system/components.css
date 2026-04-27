@@ -1142,6 +1142,32 @@ ol {
   gap: var(--space-4);
 }
 
+/*
+ * .card-grid —— 响应式九宫格容器（L5 容器组件）
+ *
+ * 设计语义：适用于"对象清单"类页面（Skills / Commands / Agents / Rules）
+ * 与 .card-stack 的区别：
+ *   - .card-stack：纵向单列流，适合"发生顺序"的时间线/步骤/消息
+ *   - .card-grid ：二维网格，适合"并列同类对象"的清单浏览
+ *
+ * 响应式行为（基于窗口宽度自动铺列数）：
+ *   最小列宽 280px，auto-fill 填满 → 宽屏越宽列越多，窄屏自动降列
+ *   典型观感：
+ *     ≥  920px 主区 → 3 列
+ *     ≥  620px 主区 → 2 列
+ *     ≤  620px 主区 → 1 列
+ *
+ * 280px 来自 L4 节律：保证卡片里标题能完整显示常见英文 Skill 名（如 brand-guidelines）
+ * 且 meta 行的 3 个 tag + hash 能一行排开
+ */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--space-4);
+  /* 当项数较少时，单项不应被拉伸占满整行，保持 280px 左右的自然宽度 */
+  align-items: start;
+}
+
 .card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
