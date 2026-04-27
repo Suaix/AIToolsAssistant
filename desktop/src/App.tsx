@@ -45,14 +45,22 @@ export function App() {
   const [route, setRoute] = useState<RouteName>('dashboard');
 
   return (
-    <div className="app-shell">
+    <div className="app-shell app-shell--native-titlebar">
       {/* 左侧：侧栏导航 */}
       <Sidebar active={route} onNavigate={setRoute} />
 
       {/* 右侧：主工作区 */}
       <main className="app-main">
-        <header className="app-main__header">
-          <h1 className="app-main__title">{ROUTE_TITLES[route]}</h1>
+        {/*
+         * 主区 header
+         * data-tauri-drag-region：与红绿灯同一水平带的右半部分，作为拖拽把手。
+         * 右上角的 ThemeToggle 是 <button>，Tauri 默认不会把按钮当作拖拽区，
+         * 无需额外标注 no-drag，点击仍正常。
+         */}
+        <header className="app-main__header" data-tauri-drag-region>
+          <h1 className="app-main__title" data-tauri-drag-region>
+            {ROUTE_TITLES[route]}
+          </h1>
           <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
             <ThemeToggle />
           </div>

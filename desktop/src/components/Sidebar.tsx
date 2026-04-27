@@ -75,8 +75,13 @@ export interface SidebarProps {
 export function Sidebar({ active, onNavigate }: SidebarProps) {
   return (
     <nav className="sidebar" aria-label="主导航">
-      {/* 品牌区 */}
-      <div className="sidebar__brand">
+      {/*
+       * 品牌区
+       * data-tauri-drag-region：macOS titleBarStyle=Overlay 下作为窗口拖拽把手，
+       * 用户从 logo/文字/空白任意位置按下均可拖动窗口。
+       * Tauri 2 原生识别此属性，子元素除非另行标注 no-drag，否则也继承可拖拽。
+       */}
+      <div className="sidebar__brand" data-tauri-drag-region>
         <span className="sidebar__logo" aria-hidden="true">
           A
         </span>

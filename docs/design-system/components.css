@@ -1044,6 +1044,38 @@ ol {
   overflow: hidden;
 }
 
+/*
+ * 原生标题栏修饰类（--native-titlebar）
+ *
+ * 使用场景：当宿主是 macOS 原生窗口且采用 titleBarStyle=Overlay（红绿灯浮层）时，
+ * 需要在侧栏顶部与主工作区顶部让出 28px 安全距离，避免品牌区被红绿灯遮挡。
+ *
+ * 纯浏览器原型无需添加此类，避免污染视觉；Tauri 桌面 App 在根节点上主动添加。
+ *
+ * 28px = 红绿灯直径 12px + 上方留白 12px + 与 logo 呼吸空间 4px
+ */
+/*
+ * 注意：窗口拖拽能力不通过 CSS 实现。
+ * - Tauri 2 不识别 `-webkit-app-region`（已验证在 macOS 上无效）
+ * - 桌面 App 在对应 DOM 元素上添加 `data-tauri-drag-region` 属性即可
+ * - 这里只负责视觉（让位 + 禁选 + 光标样式）
+ */
+.app-shell--native-titlebar .sidebar__brand {
+  padding-top: 28px;
+  height: calc(64px + 28px);
+  /* 品牌名是装饰性标识，不应被选中 */
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+
+.app-shell--native-titlebar .app-main__header {
+  padding-top: 28px;
+  height: calc(56px + 28px);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 .app-main {
   flex: 1;
   display: flex;
