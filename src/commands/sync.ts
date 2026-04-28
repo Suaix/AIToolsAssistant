@@ -1,217 +1,306 @@
 /**
- * sync 命令处理模块
- * v0.2.0：按资源类型分发（skills/commands/agents/rules/all）
- * v0.3.0：支持 --json 流式输出（NDJSON）：start / progress / summary / done 四类事件
- * 支持子命令参数（aitools sync skills）与 --type 简写两种用法
+ * sync 命令处理模块（v0.4.0 订阅驱动重写）
+ *
+ * 语义：
+ *   aitools sync                 → 所有已实现类型、所有订阅（user + 当前 cwd 项目）
+ *   aitools sync skills          → 仅 skills 类型、所有订阅
+ *   aitools sync skills <name>   → 仅同步该资源的所有订阅
+ *   aitools sync <name>          → 位置参数消歧：不是 type 时当 name 用
+ *   aitools sync --scope user    → 仅 user 订阅
+ *   aitools sync --scope project → 仅当前项目订阅
+ *   aitools sync --target foo    → 仅同步到 target=foo
+ *
+ * 流程（对每个已实现类型）：
+ *   1. handler.scan() 扫描源目录得到 ResourceInfo[]
+ *   2. 读取 user + project 订阅清单
+ *   3. expandSubscriptions() 展开为 ExpandedTask[]
+ *   4. 按订阅位置（user / 某项目）分组 emit start 事件
+ *   5. syncTasks() 逐条执行，onProgress 流式回调
+ *   6. 按分组 emit summary；最终 emit done
  */
 import fs from 'node:fs/promises';
-import fsSync from 'node:fs';
-import path from 'node:path';
 import pc from 'picocolors';
 import { loadConfig, expandTilde } from '../config/manager.js';
-import { syncAllResources, syncProjectResources } from '../core/syncer.js';
+import { syncTasks, type TaskProgressEvent } from '../core/syncer.js';
 import {
-  loadProjectConfig,
-  addResourceToProject,
-  projectConfigExists,
-  getProjectResourceList,
-} from '../config/project.js';
+  expandSubscriptions,
+  getUserSubsForType,
+  getProjectSubsForType,
+  type ExpandedTask,
+  type SubscriptionLocation,
+} from '../core/subscriptions.js';
+import { loadProjectConfig } from '../config/project.js';
 import {
   getHandler,
   isValidResourceType,
   listImplementedHandlers,
   listAllTypes,
 } from '../core/resources/registry.js';
-import { logger } from '../utils/logger.js';
 import { reporter, isJsonMode, emitJson } from '../utils/reporter.js';
 import type {
   Config,
-  ResourceInfo,
-  ResourceScope,
   ResourceType,
-  SyncProgressCallback,
-  SyncSummary,
+  SubscriptionScope,
+  SyncLocationData,
 } from '../types/index.js';
 
 /**
- * 同步命令的选项参数（来自 commander option）
+ * sync 命令的 option 参数（来自 commander）
  */
 interface SyncCommandOptions {
-  /** 可选，指定单个同步目标工具名称 */
+  /** 指定单个目标工具名 */
   target?: string;
-  /** 可选，指定要同步的资源名称（项目级添加/同步） */
-  skill?: string;
-  /** 可选，同步范围：user-仅用户级、project-仅项目级，不指定则智能检测 */
-  scope?: 'user' | 'project';
-  /** 可选，资源类型简写（与位置参数 [type] 等价） */
+  /** 订阅落点过滤 */
+  scope?: SubscriptionScope;
+  /** 资源类型简写（与位置参数 [type] 等价） */
   type?: string;
 }
 
 /**
- * 解析「资源类型」参数 —— 支持位置参数和 --type 简写双模式
- * @param typeArg commander 的位置参数
- * @param typeOption --type option 值
- * @returns 解析结果：具体资源类型或 'all'
+ * 解析 `aitools sync [type] [name]` 两个位置参数 + `--type` 简写
+ *
+ * 消歧规则（按 RFC §4.4）：
+ * 1. arg1 是合法 ResourceType / 'all' → arg1=type, arg2=name
+ * 2. arg1 不是 ResourceType 且未提供 arg2 → 当 name 处理（type='all'，下游在每个已实现类型里找）
+ * 3. arg1 不是 ResourceType 且提供了 arg2 → 视为用户笔误，报错
+ *
+ * @param arg1 第一个位置参数
+ * @param arg2 第二个位置参数
+ * @param optType --type 选项值
+ * @returns 解析结果：{ type, name }；type 非法时返回 null
  */
-function resolveType(
-  typeArg: string | undefined,
-  typeOption: string | undefined,
-): string {
-  /* 优先级：位置参数 > --type > 默认 'all' */
-  const raw = typeArg ?? typeOption;
-  return (raw ?? 'all').toLowerCase();
-}
+function resolveArgs(
+  arg1: string | undefined,
+  arg2: string | undefined,
+  optType: string | undefined,
+): { type: ResourceType | 'all'; name?: string } | null {
+  /* 优先用 --type 选项；否则用 arg1 */
+  const rawType = (optType ?? arg1 ?? 'all').toLowerCase();
 
-/**
- * 校验资源类型参数
- * @param type 待校验的类型字符串
- * @returns 合法返回对应的 ResourceType 或 'all'，非法返回 null
- */
-function parseResourceType(type: string): ResourceType | 'all' | null {
-  if (type === 'all') {
-    return 'all';
+  /* Case A：rawType 是合法类型（或 'all'） */
+  if (rawType === 'all') {
+    /* `sync all <name>` 组合没意义（name 在跨类型下无法定位） */
+    if (arg2) {
+      return null;
+    }
+    return { type: 'all', name: undefined };
   }
-  if (isValidResourceType(type)) {
-    return type;
+  if (isValidResourceType(rawType)) {
+    return { type: rawType, name: arg2 };
   }
+
+  /* Case B：arg1 不是合法类型 */
+  if (!arg2 && !optType) {
+    /* 单参数且不是类型 → 当 name 处理（type='all'，跨类型查找） */
+    return { type: 'all', name: arg1 };
+  }
+
+  /* Case C：明确给了非法类型 */
   return null;
 }
 
+/* ============================================================
+ * 事件 emit 工具
+ * ============================================================ */
+
 /**
- * 打印同步结果摘要
- * JSON 模式下不打印（GUI 从 progress/summary 事件中自行汇总展示）
- * @param summary 同步结果摘要对象
- * @param label 摘要标签（如 "用户级" 或 "项目级"）
+ * 把内部 SubscriptionLocation 转为 JSON 事件用的 SyncLocationData
  */
-function printSyncResults(summary: SyncSummary, label: string): void {
-  if (isJsonMode()) {
-    /* JSON 模式不输出彩色文本，GUI 已从事件流拿到数据 */
-    return;
+function toLocationData(location: SubscriptionLocation): SyncLocationData {
+  if (location.scope === 'user') {
+    return { scope: 'user' };
   }
-
-  /* 输出每个资源的同步结果 */
-  for (const result of summary.results) {
-    const targetNames = result.targetResults
-      .map((tr) => {
-        if (tr.action === 'created') {
-          return pc.green(tr.targetName);
-        } else if (tr.action === 'updated') {
-          return pc.yellow(tr.targetName);
-        }
-        return pc.dim(tr.targetName);
-      })
-      .join(', ');
-
-    const hasChange = result.targetResults.some(
-      (tr) => tr.action === 'created' || tr.action === 'updated',
-    );
-
-    if (hasChange) {
-      const actions = result.targetResults
-        .filter((tr) => tr.action !== 'skipped')
-        .map((tr) => (tr.action === 'created' ? '新增' : '更新'));
-      const actionLabel = [...new Set(actions)].join('/');
-      console.log(
-        `   ${pc.green('✅')} ${result.skillName} → ${targetNames} (${actionLabel})`,
-      );
-    } else {
-      console.log(
-        `   ${pc.dim('⏭️')}  ${result.skillName} → ${targetNames} (${pc.dim('无变更')})`,
-      );
-    }
-  }
-
-  /* 输出汇总统计 */
-  console.log('');
-  const parts: string[] = [];
-  if (summary.created > 0) {
-    parts.push(pc.green(`新增 ${summary.created} 个`));
-  }
-  if (summary.updated > 0) {
-    parts.push(pc.yellow(`更新 ${summary.updated} 个`));
-  }
-  if (summary.skipped > 0) {
-    parts.push(pc.dim(`跳过 ${summary.skipped} 个`));
-  }
-
-  logger.info(
-    `📊 ${label}同步完成: ${summary.totalSkills} 个资源${
-      parts.length > 0 ? '，' + parts.join('，') : ''
-    }`,
-  );
+  return { scope: 'project', projectDir: location.projectDir };
 }
 
 /**
- * 构造 onProgress 回调，将进度事件直接 emit 到 stdout（JSON 模式）
- * @returns 回调函数；human 模式下返回 undefined（syncer 将不触发 onProgress）
- */
-function makeProgressCallback(): SyncProgressCallback | undefined {
-  if (!isJsonMode()) {
-    return undefined;
-  }
-  return (event) => {
-    emitJson({ event: 'progress', data: event });
-  };
-}
-
-/**
- * 在 JSON 模式下 emit start 事件（任务开始，告知总数与目标列表）
- * @param type 资源类型
- * @param scope 层级
- * @param resources 参与同步的资源
- * @param targets 参与的目标名列表（已过滤）
+ * JSON 模式下 emit start 事件（按"订阅位置"维度聚合）
  */
 function emitStartEvent(
   type: ResourceType,
-  scope: ResourceScope,
-  resources: ResourceInfo[],
+  location: SubscriptionLocation,
+  total: number,
   targets: string[],
 ): void {
   if (!isJsonMode()) return;
   emitJson({
     event: 'start',
     data: {
+      version: 2,
       type,
-      scope,
-      total: resources.length * targets.length,
+      location: toLocationData(location),
+      total,
       targets,
     },
   });
 }
 
 /**
- * 在 JSON 模式下 emit summary 事件（单次 sync 的汇总结果）
- * @param type 资源类型
- * @param scope 层级
- * @param summary 汇总结果
+ * JSON 模式下 emit progress 事件
  */
-function emitSummaryEvent(
-  type: ResourceType,
-  scope: ResourceScope,
-  summary: SyncSummary,
+function emitProgressEvent(
+  ev: TaskProgressEvent,
 ): void {
   if (!isJsonMode()) return;
   emitJson({
-    event: 'summary',
-    data: { ...summary, type, scope },
+    event: 'progress',
+    data: {
+      version: 2,
+      resource: ev.task.resource.dirName,
+      target: ev.task.target.name,
+      location: toLocationData(ev.task.location),
+      action: ev.action,
+      index: ev.index,
+      total: ev.total,
+      ...(ev.error ? { error: ev.error } : {}),
+    },
   });
 }
 
 /**
- * 同步指定资源类型的用户级 + 智能检测项目级
- * 这是针对单一资源类型的完整流程入口
+ * JSON 模式下 emit summary 事件
+ */
+function emitSummaryEvent(
+  type: ResourceType,
+  location: SubscriptionLocation,
+  counts: {
+    total: number;
+    created: number;
+    updated: number;
+    skipped: number;
+  },
+  resultsStub: { skillName: string; targetResults: [] }[],
+): void {
+  if (!isJsonMode()) return;
+  emitJson({
+    event: 'summary',
+    data: {
+      version: 2,
+      type,
+      location: toLocationData(location),
+      totalSkills: counts.total,
+      created: counts.created,
+      updated: counts.updated,
+      skipped: counts.skipped,
+      /* SyncSummary 历史字段，保持兼容（PR-5 中 list 也会消费类似结构） */
+      results: resultsStub,
+    },
+  });
+}
+
+/* ============================================================
+ * human 模式输出（非 JSON）
+ * ============================================================ */
+
+/**
+ * 按订阅位置打印一段同步汇总（human 模式）
+ */
+function printHumanSummary(
+  type: ResourceType,
+  location: SubscriptionLocation,
+  counts: {
+    total: number;
+    created: number;
+    updated: number;
+    skipped: number;
+    failed: number;
+  },
+): void {
+  if (isJsonMode()) return;
+
+  const scopeLabel =
+    location.scope === 'user'
+      ? '用户级'
+      : `项目级 · ${location.projectDir}`;
+
+  const parts: string[] = [];
+  if (counts.created > 0) parts.push(pc.green(`新增 ${counts.created}`));
+  if (counts.updated > 0) parts.push(pc.yellow(`更新 ${counts.updated}`));
+  if (counts.skipped > 0) parts.push(pc.dim(`跳过 ${counts.skipped}`));
+  if (counts.failed > 0) parts.push(pc.red(`失败 ${counts.failed}`));
+
+  reporter.info(
+    `[${type}] ${scopeLabel}：${counts.total} 个任务${
+      parts.length > 0 ? '，' + parts.join('，') : ''
+    }`,
+  );
+}
+
+/**
+ * human 模式下每条进度打印
+ */
+function printHumanProgress(ev: TaskProgressEvent): void {
+  if (isJsonMode()) return;
+
+  const icon =
+    ev.action === 'created'
+      ? pc.green('✅')
+      : ev.action === 'updated'
+        ? pc.yellow('🔄')
+        : ev.action === 'failed'
+          ? pc.red('✖')
+          : pc.dim('⏭️');
+  const actionLabel =
+    ev.action === 'created'
+      ? '新增'
+      : ev.action === 'updated'
+        ? '更新'
+        : ev.action === 'failed'
+          ? '失败'
+          : '已最新';
+
+  const line = `   ${icon} ${ev.task.resource.dirName} → ${ev.task.target.name} (${actionLabel})`;
+  console.log(ev.error ? `${line}  ${pc.red(ev.error)}` : line);
+}
+
+/* ============================================================
+ * 按「订阅位置」分组执行
+ * ============================================================ */
+
+/**
+ * 将一批 ExpandedTask 按订阅位置分组
+ * key: `user` 或 `project:<projectDir>`
+ */
+function groupByLocation(
+  tasks: ExpandedTask[],
+): Map<string, { location: SubscriptionLocation; tasks: ExpandedTask[] }> {
+  const groups = new Map<
+    string,
+    { location: SubscriptionLocation; tasks: ExpandedTask[] }
+  >();
+  for (const t of tasks) {
+    const key =
+      t.location.scope === 'user'
+        ? 'user'
+        : `project:${t.location.projectDir ?? ''}`;
+    const group = groups.get(key);
+    if (group) {
+      group.tasks.push(t);
+    } else {
+      groups.set(key, { location: t.location, tasks: [t] });
+    }
+  }
+  return groups;
+}
+
+/* ============================================================
+ * 单一资源类型的订阅执行
+ * ============================================================ */
+
+/**
+ * 同步单一资源类型的所有订阅
  * @param type 资源类型
  * @param config 全局配置
- * @param options 命令行选项
+ * @param options CLI 选项
+ * @param nameFilter 可选，只同步指定资源名
  */
 async function syncOneType(
   type: ResourceType,
   config: Config,
   options: SyncCommandOptions,
+  nameFilter?: string,
 ): Promise<void> {
   const handler = getHandler(type);
-
-  /* 未实现类型：输出占位提示后返回 */
   if (!handler.implemented) {
     reporter.warn(`[${type}] 暂未支持，敬请期待`);
     return;
@@ -219,255 +308,104 @@ async function syncOneType(
 
   const sourceDir = expandTilde(config.source);
   const projectDir = process.cwd();
-  const targetFilter = options.target;
 
-  /* ==================== 模式一：--skill 指定资源添加到项目并同步 ==================== */
-  if (options.skill) {
-    const resourceName = options.skill;
+  /* 扫描源资源（扁平） */
+  const resources = await handler.scan(sourceDir);
 
-    /* 优先在 project scope 查找，其次 user scope */
-    const projectList = await handler.scan(sourceDir, 'project');
-    const userList = await handler.scan(sourceDir, 'user');
-    const matched =
-      projectList.find((r) => r.dirName === resourceName) ??
-      userList.find((r) => r.dirName === resourceName);
-
-    if (!matched) {
-      reporter.error(`[${type}] 资源 '${resourceName}' 不存在于源目录中`);
-      reporter.info(
-        `   查找位置: ${sourceDir}/${handler.resourceDirName}/{user,project}/`,
-      );
-      const available = [...projectList, ...userList].map((r) => r.dirName);
-      if (available.length > 0) {
-        reporter.info(`   可用资源: ${available.join(', ')}`);
-      }
-      return;
-    }
-
-    /* 添加到项目配置（自动去重） */
-    await addResourceToProject(projectDir, type, resourceName);
-    reporter.success(`[${type}] 资源 '${resourceName}' 已关联到当前项目`);
-
-    /* 执行项目级同步（仅同步该资源） */
-    reporter.blank();
-    reporter.info(`🔄 [${type}] 正在同步项目级资源: ${resourceName}...`);
-    reporter.blank();
-
-    /* 计算参与目标（用于 start 事件） */
-    const projectTargetsForEvent = computeProjectTargets(config, projectDir, targetFilter);
-    emitStartEvent(type, 'project', [matched], projectTargetsForEvent);
-
-    const summary = await syncProjectResources(
-      [matched],
-      config,
-      projectDir,
-      type,
-      targetFilter,
-      makeProgressCallback(),
-    );
-    printSyncResults(summary, `[${type}] 项目级`);
-    emitSummaryEvent(type, 'project', summary);
-    return;
-  }
-
-  /* ==================== 模式二：--scope project 仅项目级同步 ==================== */
-  if (options.scope === 'project') {
-    const hasProjectConfig = await projectConfigExists(projectDir);
-    if (!hasProjectConfig) {
-      reporter.error(
-        `[${type}] 当前目录未关联任何资源，请使用 --skill <name> 添加`,
-      );
-      return;
-    }
-
-    const projectConfig = await loadProjectConfig(projectDir);
-    if (!projectConfig) {
-      reporter.info(`[${type}] 项目配置无效或为空`);
-      return;
-    }
-
-    const associated = getProjectResourceList(projectConfig, type);
-    if (associated.length === 0) {
-      reporter.info(`[${type}] 项目未关联任何 ${type} 资源`);
-      return;
-    }
-
-    /* 项目关联的资源可能来自 user 或 project scope，都要查找 */
-    const allSource = [
-      ...(await handler.scan(sourceDir, 'project')),
-      ...(await handler.scan(sourceDir, 'user')),
-    ];
-
-    const matchedResources: ResourceInfo[] = [];
-    for (const name of associated) {
-      const found = allSource.find((r) => r.dirName === name);
-      if (found) {
-        matchedResources.push(found);
-      } else {
-        reporter.warn(`[${type}] 资源 '${name}' 在源目录中不存在，已跳过`);
-      }
-    }
-
-    if (matchedResources.length === 0) {
-      reporter.info(`[${type}] 没有可同步的项目级资源`);
-      return;
-    }
-
-    reporter.blank();
-    reporter.info(
-      `🔄 [${type}] 正在同步项目级资源... (${matchedResources.length} 个)`,
-    );
-    reporter.blank();
-
-    const projectTargetsForEvent = computeProjectTargets(config, projectDir, targetFilter);
-    emitStartEvent(type, 'project', matchedResources, projectTargetsForEvent);
-
-    const summary = await syncProjectResources(
-      matchedResources,
-      config,
-      projectDir,
-      type,
-      targetFilter,
-      makeProgressCallback(),
-    );
-    printSyncResults(summary, `[${type}] 项目级`);
-    emitSummaryEvent(type, 'project', summary);
-    return;
-  }
-
-  /* ==================== 模式三：默认/--scope user —— 用户级 + 智能检测项目级 ==================== */
-  const userResources = await handler.scan(sourceDir, 'user');
-
-  if (userResources.length === 0) {
-    reporter.info(
-      `[${type}] 源目录中没有发现任何用户级 ${type}（${sourceDir}/${handler.resourceDirName}/user/）`,
-    );
-  } else {
-    /* 检查是否有已启用的目标 */
-    const enabledTargets = config.targets.filter((t) => t.enabled);
-    if (enabledTargets.length === 0) {
-      reporter.error(
-        `[${type}] 没有已启用的同步目标，请检查配置或运行 aitools init`,
-      );
-      return;
-    }
-
-    reporter.blank();
-    reporter.info(
-      `🔄 [${type}] 正在同步用户级资源... (${userResources.length} 个)`,
-    );
-    reporter.blank();
-
-    /* 计算参与的目标（用于 start 事件） */
-    const userTargetsForEvent = targetFilter
-      ? enabledTargets.filter((t) => t.name === targetFilter).map((t) => t.name)
-      : enabledTargets.map((t) => t.name);
-    emitStartEvent(type, 'user', userResources, userTargetsForEvent);
-
-    const userSummary = await syncAllResources(
-      userResources,
-      config,
-      type,
-      targetFilter,
-      makeProgressCallback(),
-    );
-    printSyncResults(userSummary, `[${type}] 用户级`);
-    emitSummaryEvent(type, 'user', userSummary);
-  }
-
-  /* 如果 scope 显式为 user，不检测项目级 */
-  if (options.scope === 'user') {
-    return;
-  }
-
-  /* 智能检测项目级 */
-  const hasProjectConfig = await projectConfigExists(projectDir);
-  if (!hasProjectConfig) {
-    return;
-  }
-
+  /* 读取两级订阅清单 */
+  const userSubs = getUserSubsForType(config, type);
   const projectConfig = await loadProjectConfig(projectDir);
-  if (!projectConfig) {
+  const projectSubs = getProjectSubsForType(projectConfig, type);
+
+  /* 参与目标（过滤 enabled + --target） */
+  const enabledTargets = config.targets.filter((t) => t.enabled);
+  if (enabledTargets.length === 0) {
+    reporter.error(
+      `[${type}] 没有已启用的同步目标，请检查配置或运行 aitools init`,
+    );
     return;
   }
 
-  const associated = getProjectResourceList(projectConfig, type);
-  if (associated.length === 0) {
-    return;
-  }
-
-  /* 项目关联的资源在 user/project 两个 scope 中查找 */
-  const projectScopeList = await handler.scan(sourceDir, 'project');
-  const allSource = [...projectScopeList, ...userResources];
-
-  const matchedResources: ResourceInfo[] = [];
-  for (const name of associated) {
-    const found = allSource.find((r) => r.dirName === name);
-    if (found) {
-      matchedResources.push(found);
-    } else {
-      reporter.warn(`[${type}] 资源 '${name}' 在源目录中不存在，已跳过`);
-    }
-  }
-
-  if (matchedResources.length === 0) {
-    return;
-  }
-
-  reporter.blank();
-  reporter.info(
-    `🔄 [${type}] 正在同步项目级资源... (${matchedResources.length} 个)`,
-  );
-  reporter.blank();
-
-  const projectTargetsForEvent = computeProjectTargets(config, projectDir, targetFilter);
-  emitStartEvent(type, 'project', matchedResources, projectTargetsForEvent);
-
-  const projectSummary = await syncProjectResources(
-    matchedResources,
-    config,
-    projectDir,
+  /* 展开订阅 */
+  const expanded = expandSubscriptions({
     type,
-    targetFilter,
-    makeProgressCallback(),
-  );
-  printSyncResults(projectSummary, `[${type}] 项目级`);
-  emitSummaryEvent(type, 'project', projectSummary);
-}
+    resourceDirName: handler.resourceDirName,
+    resources,
+    enabledTargets,
+    userSubscriptions: userSubs,
+    projectContext: projectConfig
+      ? { projectDir, subscriptions: projectSubs }
+      : null,
+    targetFilter: options.target,
+    scopeFilter: options.scope,
+    nameFilter,
+  });
 
-/**
- * 计算项目级同步时实际参与的目标名列表（用于 start 事件）
- * 逻辑对齐 syncProjectResources 内部的筛选策略：
- * - 若有 targetFilter，优先
- * - 否则按"项目目录是否存在 .<targetName>/"检测
- * - 都检测不到时回退到全部已启用目标（GUI 场景下通常会由 GUI 主动传 targetFilter）
- */
-function computeProjectTargets(
-  config: Config,
-  projectDir: string,
-  targetFilter?: string,
-): string[] {
-  const enabled = config.targets.filter((t) => t.enabled);
-  if (targetFilter) {
-    return enabled.filter((t) => t.name === targetFilter).map((t) => t.name);
+  /* 孤儿订阅告警（订阅了但源里没有） */
+  if (expanded.orphanNames.length > 0) {
+    reporter.warn(
+      `[${type}] 以下资源订阅存在但源目录中不存在: ${expanded.orphanNames.join(
+        ', ',
+      )}`,
+    );
   }
-  const detected = enabled.filter((t) =>
-    fsSync.existsSync(path.join(projectDir, `.${t.name}`)),
-  );
-  return (detected.length > 0 ? detected : enabled).map((t) => t.name);
+
+  if (expanded.tasks.length === 0) {
+    if (nameFilter) {
+      reporter.info(`[${type}] 资源 '${nameFilter}' 未被任何位置订阅，跳过`);
+    } else {
+      reporter.info(`[${type}] 没有可同步的订阅`);
+    }
+    return;
+  }
+
+  /* 按订阅位置分组执行，每组独立发 start + summary 事件 */
+  const groups = groupByLocation(expanded.tasks);
+
+  for (const [, group] of groups) {
+    const targetNames = Array.from(
+      new Set(group.tasks.map((t) => t.target.name)),
+    );
+
+    reporter.blank();
+    const scopeLabel =
+      group.location.scope === 'user'
+        ? '用户级'
+        : `项目级 · ${group.location.projectDir}`;
+    reporter.info(
+      `🔄 [${type}] 正在同步${scopeLabel} (${group.tasks.length} 个任务)...`,
+    );
+    reporter.blank();
+
+    emitStartEvent(type, group.location, group.tasks.length, targetNames);
+
+    const batchSummary = await syncTasks(group.tasks, (ev) => {
+      emitProgressEvent(ev);
+      printHumanProgress(ev);
+    });
+
+    printHumanSummary(type, group.location, batchSummary);
+    emitSummaryEvent(type, group.location, batchSummary, []);
+  }
 }
 
+/* ============================================================
+ * CLI 入口
+ * ============================================================ */
+
 /**
- * 同步命令处理函数
- * 根据 type 参数分发到对应资源类型的 handler；'all' 则遍历所有已实现类型
- * @param typeArg commander 位置参数 [type]
- * @param options 命令行选项参数
+ * sync 命令入口函数
+ *
+ * @param typeArg 第一个位置参数 [type] 或 [name]
+ * @param nameArg 第二个位置参数 [name]
+ * @param options 命令行选项
  */
 export async function syncCommand(
   typeArg: string | undefined,
+  nameArg: string | undefined,
   options: SyncCommandOptions,
 ): Promise<void> {
-  /* 读取全局配置文件 */
+  /* 读取全局配置 */
   const config = await loadConfig();
   if (!config) {
     if (isJsonMode()) {
@@ -476,80 +414,65 @@ export async function syncCommand(
     return;
   }
 
-  /* 展开源目录路径 */
+  /* 展开并校验源目录 */
   const sourceDir = expandTilde(config.source);
-
-  /* 校验源目录存在性 */
   try {
     const stat = await fs.stat(sourceDir);
     if (!stat.isDirectory()) {
       reporter.error(`源路径不是目录: ${config.source}`);
-      if (isJsonMode()) {
-        emitJson({ event: 'done', data: { exitCode: 1 } });
-      }
+      if (isJsonMode()) emitJson({ event: 'done', data: { exitCode: 1 } });
       return;
     }
   } catch {
     reporter.error(`源目录不存在: ${config.source}`);
-    if (isJsonMode()) {
-      emitJson({ event: 'done', data: { exitCode: 1 } });
-    }
+    if (isJsonMode()) emitJson({ event: 'done', data: { exitCode: 1 } });
     return;
   }
 
-  /* 解析资源类型参数 */
-  const resolved = resolveType(typeArg, options.type);
-  const parsed = parseResourceType(resolved);
-
+  /* 解析位置参数 */
+  const parsed = resolveArgs(typeArg, nameArg, options.type);
   if (parsed === null) {
     reporter.error(
-      `未知的资源类型: ${resolved}。可选值: ${['all', ...listAllTypes()].join(', ')}`,
+      `参数解析失败。用法: aitools sync [type] [name]；type 可选值: ${[
+        'all',
+        ...listAllTypes(),
+      ].join(', ')}`,
     );
-    if (isJsonMode()) {
-      emitJson({ event: 'done', data: { exitCode: 1 } });
-    }
+    if (isJsonMode()) emitJson({ event: 'done', data: { exitCode: 1 } });
     return;
   }
+
+  const { type, name } = parsed;
 
   /* 单一资源类型 */
-  if (parsed !== 'all') {
-    await syncOneType(parsed, config, options);
-    if (isJsonMode()) {
-      emitJson({ event: 'done', data: { exitCode: 0 } });
-    }
+  if (type !== 'all') {
+    await syncOneType(type, config, options, name);
+    if (isJsonMode()) emitJson({ event: 'done', data: { exitCode: 0 } });
     return;
   }
 
-  /* all：遍历所有已实现的资源类型 */
+  /* type='all'：遍历所有已实现类型 */
   const implemented = listImplementedHandlers();
   if (implemented.length === 0) {
     reporter.warn('当前没有任何已实现的资源类型');
-    if (isJsonMode()) {
-      emitJson({ event: 'done', data: { exitCode: 0 } });
-    }
-    return;
-  }
-
-  /* 对于 all 场景，如果用户还传了 --skill，这是矛盾的（--skill 必须配合具体类型） */
-  if (options.skill) {
-    reporter.error(
-      '--skill 参数必须指定具体资源类型，例如: aitools sync skills --skill <name>',
-    );
-    if (isJsonMode()) {
-      emitJson({ event: 'done', data: { exitCode: 1 } });
-    }
+    if (isJsonMode()) emitJson({ event: 'done', data: { exitCode: 0 } });
     return;
   }
 
   for (const handler of implemented) {
-    await syncOneType(handler.type, config, options);
+    /**
+     * type='all' + name 的组合：在每个已实现类型里分别尝试匹配该 name
+     * 若某类型的订阅清单没有该 name，syncOneType 内部会打印"未订阅，跳过"
+     * 不视为错误——符合 RFC §10 的"明确先于惊喜"（不做智能猜测）
+     */
+    await syncOneType(handler.type, config, options, name);
   }
 
-  /* 对未实现类型输出一次汇总提示 */
+  /* 未实现类型统一汇总提示 */
   const pending = listAllTypes().filter((t) => !getHandler(t).implemented);
   if (pending.length > 0) {
     reporter.blank();
-    reporter.warn(`以下资源类型暂未支持同步：${pending.join(', ')}`);
+    reporter.warn(`以下资源类型暂未支持同步: ${pending.join(', ')}`);
   }
 
   if (isJsonMode()) {

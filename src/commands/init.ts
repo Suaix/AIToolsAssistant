@@ -1,10 +1,12 @@
 /**
  * init 命令处理模块
- * 实现交互式全局初始化：
- *   - 指定源目录（可选，默认 ~/.aitools/）
- *   - 自动创建 <source>/<resource_type>/<scope>/ 骨架（8 个叶子目录）
- *   - 选择同步目标工具（非必填，默认仅 codebuddy）
- *   - 生成 ~/.aitools/config.yaml
+ *
+ * v0.4.0 交互流程：
+ *   1. 指定源目录（可选，默认 ~/.aitools/）
+ *   2. 自动创建扁平骨架 <source>/{skills,commands,agents,rules}/
+ *   3. 选择同步目标工具（非必填，默认仅 codebuddy）
+ *   4. 生成 ~/.aitools/config.yaml（含空的 user_subscriptions）
+ *   5. 扫描源目录中已存在的资源，给出「首次订阅引导」（RFC §4.6 Q3）
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -21,6 +23,7 @@ import {
   getConfigPath,
   getDefaultSourceDir,
 } from '../config/manager.js';
+import { getHandler } from '../core/resources/registry.js';
 import type { Target } from '../types/index.js';
 
 /**
@@ -89,14 +92,16 @@ export async function initCommand(): Promise<void> {
     logger.success(`源目录已创建: ${collapseTilde(expandedSource)}`);
   }
 
-  /* 步骤 2：生成资源骨架子目录（skills/commands/agents/rules × user/project） */
+  /* 步骤 2：生成资源骨架子目录（v0.4 扁平：skills/commands/agents/rules） */
   const scaffold = await ensureResourceSkeleton(expandedSource);
   if (scaffold.created.length > 0) {
     logger.success(
       `已创建 ${scaffold.created.length} 个资源骨架目录（跳过已有 ${scaffold.skipped.length} 个）`,
     );
   } else {
-    logger.info(`资源骨架目录已存在（共 ${scaffold.skipped.length} 个），未创建新目录`);
+    logger.info(
+      `资源骨架目录已存在（共 ${scaffold.skipped.length} 个），未创建新目录`,
+    );
   }
 
   /* 步骤 3：选择同步目标工具（非必填，默认 codebuddy） */
@@ -109,7 +114,8 @@ export async function initCommand(): Promise<void> {
   }));
 
   const selectedNames = await checkbox({
-    message: '要同步到哪些 AI 工具？（空格切换，回车确认；可全不选，默认 codebuddy）',
+    message:
+      '要同步到哪些 AI 工具？（空格切换，回车确认；可全不选，默认 codebuddy）',
     choices,
   });
 
@@ -122,7 +128,7 @@ export async function initCommand(): Promise<void> {
         : selectedNames.includes(t.name),
   }));
 
-  /* 步骤 4：生成配置文件 */
+  /* 步骤 4：生成配置文件（v0.4 默认含空 user_subscriptions） */
   const displaySource = trimmedInput
     ? trimmedInput.startsWith('~')
       ? trimmedInput
@@ -140,31 +146,63 @@ export async function initCommand(): Promise<void> {
   const enabledNames = targets.filter((t) => t.enabled).map((t) => t.name);
   logger.info(`同步目标: ${enabledNames.join(', ') || '(无)'}`);
 
-  /* 步骤 5：完成引导 —— 列出骨架结构与示例路径 */
+  /* 步骤 5：源目录结构说明 */
   console.log('');
-  logger.info('📁 源目录骨架结构:');
+  logger.info('📁 源目录骨架结构（v0.4 扁平化）:');
   console.log(`   ${displaySource}/`);
-  console.log('   ├── skills/        (当前仅 skills 已实现同步)');
-  console.log('   │   ├── user/      <- 存放用户级 skills (自动同步到所有已启用工具)');
-  console.log('   │   └── project/   <- 存放项目级 skills (需通过 --skill 关联到项目)');
-  console.log('   ├── commands/      (预留，暂未支持同步)');
-  console.log('   │   ├── user/');
-  console.log('   │   └── project/');
-  console.log('   ├── agents/        (预留，暂未支持同步)');
-  console.log('   │   ├── user/');
-  console.log('   │   └── project/');
-  console.log('   └── rules/         (预留，暂未支持同步)');
-  console.log('       ├── user/');
-  console.log('       └── project/');
+  console.log('   ├── skills/       (资源扁平存放，身份由订阅清单声明)');
+  console.log('   ├── commands/     (预留，暂未支持同步)');
+  console.log('   ├── agents/       (预留，暂未支持同步)');
+  console.log('   └── rules/        (预留，暂未支持同步)');
+
+  /* 步骤 6：首次订阅引导（v0.4 RFC §4.6 Q3） */
+  await guideFirstSubscription(expandedSource);
 
   console.log('');
-  logger.info('💡 接下来:');
+  logger.info('💡 常用命令:');
   logger.info(
-    `   1. 将用户级 skill 文件夹放入 ${displaySource}/skills/user/<name>/（包含 SKILL.md）`,
+    `   1. 把 skill 文件夹放入 ${displaySource}/skills/<name>/（需包含 SKILL.md）`,
   );
   logger.info(
-    `   2. 将项目级 skill 文件夹放入 ${displaySource}/skills/project/<name>/`,
+    '   2. aitools subscribe skills <name>           —— 订阅到用户级',
   );
-  logger.info('   3. 运行 aitools sync skills 开始同步（或 aitools sync 同步全部已实现类型）');
-  logger.info('   4. 运行 aitools list skills 查看同步状态');
+  logger.info(
+    '   3. aitools subscribe skills <name> --scope project  —— 订阅到当前项目',
+  );
+  logger.info('   4. aitools sync                              —— 按订阅清单同步');
+  logger.info('   5. aitools list                              —— 查看订阅与状态');
+}
+
+/**
+ * 首次订阅引导
+ *
+ * v0.4.0 RFC §4.6 Q3 决策：
+ * - init 不自动订阅任何资源（保持「克制先于全面」）
+ * - 但若源目录已存在 skill，给出一次性友好提示，告知用户如何订阅
+ *
+ * @param sourceDir 已展开的源目录绝对路径
+ */
+async function guideFirstSubscription(sourceDir: string): Promise<void> {
+  try {
+    const handler = getHandler('skills');
+    const resources = await handler.scan(sourceDir);
+    if (resources.length === 0) {
+      return;
+    }
+
+    console.log('');
+    logger.info(
+      `🔍 检测到源目录已有 ${resources.length} 个 skill（未订阅，不会被自动同步）：`,
+    );
+    for (const r of resources.slice(0, 5)) {
+      console.log(`   · ${r.dirName}`);
+    }
+    if (resources.length > 5) {
+      console.log(`   · ... 另有 ${resources.length - 5} 个`);
+    }
+    console.log('');
+    logger.info('   如需同步，请使用 `aitools subscribe skills <name>` 显式订阅。');
+  } catch {
+    /* 引导失败不影响 init 主流程 */
+  }
 }

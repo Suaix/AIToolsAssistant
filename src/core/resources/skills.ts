@@ -6,11 +6,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { logger } from '../../utils/logger.js';
-import type {
-  ResourceHandler,
-  ResourceInfo,
-  ResourceScope,
-} from '../../types/index.js';
+import type { ResourceHandler, ResourceInfo } from '../../types/index.js';
 
 /** Skill 主文件名（必需文件） */
 const SKILL_FILE_NAME = 'SKILL.md';
@@ -60,14 +56,15 @@ function parseFrontmatter(content: string): Record<string, unknown> | null {
 
 /**
  * 从单个 Skill 文件夹中读取并解析元数据
+ *
+ * v0.4.0：不再携带 scope 字段（身份与订阅解耦；详见 RFC-001 §2）。
+ * 为保持 `ResourceInfo` 编译期结构兼容，这里仍给 `scope` 填 'user' 作占位值
+ * ——该字段已标记 @deprecated，PR-3/5 重写调用方后会彻底删除。
+ *
  * @param skillDirPath Skill 文件夹的绝对路径
- * @param scope 资源层级
  * @returns ResourceInfo 对象
  */
-async function parseSkillInfo(
-  skillDirPath: string,
-  scope: ResourceScope,
-): Promise<ResourceInfo> {
+async function parseSkillInfo(skillDirPath: string): Promise<ResourceInfo> {
   const dirName = path.basename(skillDirPath);
   const skillFilePath = path.join(skillDirPath, SKILL_FILE_NAME);
 
@@ -77,7 +74,8 @@ async function parseSkillInfo(
     description: '-',
     path: skillDirPath,
     dirName,
-    scope,
+    /* v0.4 过渡占位：@deprecated 的 scope 字段，调用方若读到请忽略 */
+    scope: 'user',
     type: 'skills',
   };
 
@@ -105,24 +103,23 @@ async function parseSkillInfo(
 }
 
 /**
- * 扫描 <sourceDir>/skills/<scope>/ 下的所有有效 Skill 文件夹
+ * 扫描 <sourceDir>/skills/ 下的所有有效 Skill 文件夹（扁平结构）
  * 有效 Skill 文件夹 = 包含 SKILL.md 文件的子目录
+ *
+ * v0.4.0：目录结构从 `skills/{user,project}/<name>/` 扁平为 `skills/<name>/`
+ *
  * @param sourceDir 源目录根路径
- * @param scope 资源层级
- * @returns 所有有效 Skill 的元数据数组
+ * @returns 所有有效 Skill 的元数据数组；skills/ 目录不存在时返回空数组
  */
-async function scanSkills(
-  sourceDir: string,
-  scope: ResourceScope,
-): Promise<ResourceInfo[]> {
-  const scopeDir = path.join(sourceDir, 'skills', scope);
+async function scanSkills(sourceDir: string): Promise<ResourceInfo[]> {
+  const skillsDir = path.join(sourceDir, 'skills');
   const skills: ResourceInfo[] = [];
 
   let entries;
   try {
-    entries = await fs.readdir(scopeDir, { withFileTypes: true });
+    entries = await fs.readdir(skillsDir, { withFileTypes: true });
   } catch (error) {
-    /* scope 目录不存在：视为 0 资源，不报错 */
+    /* skills/ 目录不存在：视为 0 资源，不报错 */
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       return [];
     }
@@ -137,7 +134,7 @@ async function scanSkills(
       continue;
     }
 
-    const skillDirPath = path.join(scopeDir, entry.name);
+    const skillDirPath = path.join(skillsDir, entry.name);
     const skillFilePath = path.join(skillDirPath, SKILL_FILE_NAME);
 
     /* 检查是否包含 SKILL.md */
@@ -147,7 +144,7 @@ async function scanSkills(
       continue;
     }
 
-    const info = await parseSkillInfo(skillDirPath, scope);
+    const info = await parseSkillInfo(skillDirPath);
     skills.push(info);
   }
 

@@ -44,7 +44,8 @@ describe('Registry', () => {
   });
 
   it('占位 handler 的 scan 返回空数组', async () => {
-    const result = await getHandler('commands').scan('/any/path', 'user');
+    /* v0.4.0：scan 无 scope 参数 */
+    const result = await getHandler('commands').scan('/any/path');
     expect(result).toEqual([]);
   });
 

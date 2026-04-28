@@ -243,3 +243,64 @@ export async function addSkillToProject(
 ): Promise<void> {
   await addResourceToProject(projectDir, 'skills', skillName);
 }
+
+/**
+ * 从项目配置中移除一条资源名称
+ * 幂等：若资源不存在或配置文件不存在，均不报错、不做任何改动
+ * v0.4.0 新增：用于 unsubscribe 命令
+ * @param projectDir 项目根目录的绝对路径
+ * @param type 资源类型
+ * @param resourceName 要移除的资源名称
+ * @returns true 表示确实移除了；false 表示资源原本就不在（或配置不存在）
+ */
+export async function removeResourceFromProject(
+  projectDir: string,
+  type: ResourceType,
+  resourceName: string,
+): Promise<boolean> {
+  const existing = await loadProjectConfig(projectDir);
+  if (!existing) {
+    /* 配置文件本来就没有，无需处理 */
+    return false;
+  }
+
+  const list = getProjectResourceList(existing, type);
+  const idx = list.indexOf(resourceName);
+  if (idx < 0) {
+    return false;
+  }
+
+  list.splice(idx, 1);
+  const updated: ProjectConfig = { ...existing };
+  switch (type) {
+    case 'skills':
+      /* skills 是必填字段，即使为空也保留空数组 */
+      updated.skills = list;
+      break;
+    case 'commands':
+      /* 可选字段：空列表时不写入，保持 YAML 简洁 */
+      if (list.length === 0) {
+        delete updated.commands;
+      } else {
+        updated.commands = list;
+      }
+      break;
+    case 'agents':
+      if (list.length === 0) {
+        delete updated.agents;
+      } else {
+        updated.agents = list;
+      }
+      break;
+    case 'rules':
+      if (list.length === 0) {
+        delete updated.rules;
+      } else {
+        updated.rules = list;
+      }
+      break;
+  }
+
+  await saveProjectConfig(projectDir, updated);
+  return true;
+}

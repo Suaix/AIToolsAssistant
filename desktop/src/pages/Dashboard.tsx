@@ -9,13 +9,14 @@
  *   - has_unsynced：存在未同步/需更新（warning 型）
  */
 import { useEffect, useState } from 'react';
-import { CheckCircle2, AlertTriangle, Loader2, Terminal } from 'lucide-react';
+import { CheckCircle2, AlertTriangle, Loader2, Terminal, RefreshCw } from 'lucide-react';
 import {
   checkCliAvailable,
   listResources,
   type ResourceListItem,
   CliError,
 } from '../lib/cli';
+import { SyncProgressModal } from '../components/SyncProgressModal';
 
 /** Dashboard 状态机的 5 种状态 */
 type DashboardState =
@@ -30,6 +31,8 @@ type DashboardState =
  */
 export function Dashboard() {
   const [state, setState] = useState<DashboardState>({ kind: 'loading' });
+  /** 是否显示同步 Modal */
+  const [syncOpen, setSyncOpen] = useState(false);
 
   useEffect(() => {
     void loadDashboard();
@@ -93,7 +96,11 @@ export function Dashboard() {
 
   return (
     <div>
-      <HeroCard state={state} onRetry={() => void loadDashboard()} />
+      <HeroCard
+        state={state}
+        onRetry={() => void loadDashboard()}
+        onSync={() => setSyncOpen(true)}
+      />
 
       {/* 开发进度区（保留，作为 MVP 阶段的透明沟通） */}
       <section className="page-section">
@@ -114,19 +121,29 @@ export function Dashboard() {
             </p>
           </article>
           <article className="card">
-            <h3 className="card__title">🔨 阶段 3 · 对接 CLI 只读（当前）</h3>
+            <h3 className="card__title">✅ 阶段 3 · 对接 CLI 只读</h3>
             <p className="card__desc">
               已完成：Rust invoke_cli command；NDJSON 解析层；Skills 页 4 态化；Dashboard 实时健康度。
             </p>
           </article>
           <article className="card">
-            <h3 className="card__title">⏳ 阶段 4 · 双向同步</h3>
+            <h3 className="card__title">🔨 阶段 4 · 双向同步（当前）</h3>
             <p className="card__desc">
-              待开发：同步按钮；Tauri event 流式进度；640ms 同步魔法动效。
+              已完成：Rust invoke_cli_stream 流式命令；SyncProgressModal 进度弹窗；Dashboard / Skills 同步入口。
             </p>
           </article>
         </div>
       </section>
+
+      {/* 同步进度弹窗 —— 仅在用户点击「立即同步」后挂载 */}
+      {syncOpen && (
+        <SyncProgressModal
+          args={['sync', 'skills']}
+          title="同步全部 Skills"
+          onClose={() => setSyncOpen(false)}
+          onSyncedSomething={() => void loadDashboard()}
+        />
+      )}
     </div>
   );
 }
@@ -138,12 +155,14 @@ export function Dashboard() {
 interface HeroCardProps {
   state: DashboardState;
   onRetry: () => void;
+  /** has_unsynced 态下点击「立即同步」触发 */
+  onSync: () => void;
 }
 
 /**
  * 首屏状态卡片：5 态驱动的视觉焦点
  */
-function HeroCard({ state, onRetry }: HeroCardProps) {
+function HeroCard({ state, onRetry, onSync }: HeroCardProps) {
   if (state.kind === 'loading') {
     return (
       <section className="hero-card" aria-live="polite" aria-busy="true">
@@ -260,8 +279,11 @@ function HeroCard({ state, onRetry }: HeroCardProps) {
         </p>
       </div>
       <div className="hero-card__action">
-        <button type="button" className="btn btn--ghost" onClick={onRetry}>
-          刷新
+        <button type="button" className="btn btn--ghost btn--icon" onClick={onRetry} aria-label="刷新">
+          <RefreshCw size={18} aria-hidden="true" />
+        </button>
+        <button type="button" className="btn btn--primary" onClick={onSync}>
+          立即同步
         </button>
       </div>
     </section>

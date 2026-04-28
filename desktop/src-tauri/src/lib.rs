@@ -2,18 +2,22 @@
  * Tauri 应用主入口
  *
  * 架构：UI-over-CLI —— 桌面 App 不重复实现业务逻辑，
- * 而是通过 invoke_cli command 调用 aitools CLI，消费其 --json NDJSON 输出。
+ * 而是通过 invoke_cli / invoke_cli_stream command 调用 aitools CLI，
+ * 消费其 --json NDJSON 输出。
  *
  * 参见：CODEBUDDY.md「架构要点」与 src/utils/reporter.ts
  */
 
-use std::process::Command;
+use std::io::{BufRead, BufReader};
+use std::process::{Command, Stdio};
+use std::thread;
+
+use tauri::{AppHandle, Emitter};
 
 /// 调用 aitools CLI 的返回结果（一次性回传，非流式）
 ///
-/// MVP 阶段采用"阻塞式调用 + 一次性返回 stdout"的简化策略：
-/// - list 命令耗时短（< 1s），不需要流式事件
-/// - 阶段 4 实现 sync 同步时再切换到 `tauri::Emitter` 流式发送
+/// 用于 list 等耗时短（< 1s）的只读命令；
+/// 对 sync 等需要流式进度的命令，请使用 [`invoke_cli_stream`]。
 #[derive(serde::Serialize)]
 struct CliResult {
     /// 进程退出码（0 = 成功；非 0 通常代表 CLI 内部错误或未找到）
@@ -24,9 +28,29 @@ struct CliResult {
     stderr: String,
 }
 
-/// Tauri command：调用系统 PATH 中的 aitools CLI
+/// 参数白名单校验：阻止 shell 元字符进入命令行，防命令注入
 ///
-/// 参数 `args` 是 CLI 参数数组，调用方负责拼接（如 `["--json", "list", "skills"]`）。
+/// 允许：字母、数字、常见路径/参数字符（`-`、`_`、`.`、`/`、`=`、`~`）
+/// 禁止：单引号、反引号、`$`、`;`、`&`、`|`、`<`、`>`、空格（空格由 join 控制）
+fn validate_args(args: &[String]) -> Result<(), String> {
+    for arg in args {
+        if arg.contains('\'')
+            || arg.contains('`')
+            || arg.contains('$')
+            || arg.contains(';')
+            || arg.contains('&')
+            || arg.contains('|')
+            || arg.contains('<')
+            || arg.contains('>')
+            || arg.contains('\n')
+        {
+            return Err(format!("参数包含非法字符: {}", arg));
+        }
+    }
+    Ok(())
+}
+
+/// Tauri command：同步（阻塞）调用 aitools CLI
 ///
 /// ### macOS PATH 坑位
 /// GUI 应用的进程环境 PATH 不包含 nvm / pnpm 注入的用户 bin 目录，
@@ -34,17 +58,12 @@ struct CliResult {
 /// 解决：通过登录 shell（`sh -lc`）执行，让 shell rc 加载完整 PATH。
 ///
 /// ### 错误处理策略
-/// - 进程启动失败（未找到 shell / 权限问题）：返回 Err，前端展示"CLI 不可用"态
+/// - 进程启动失败：返回 Err，前端展示"CLI 不可用"态
 /// - 进程成功启动但 CLI 自身报错（exit != 0）：返回 Ok，exit_code 非零，
 ///   前端从 stderr 或 stdout 的 error 事件中提取原因
 #[tauri::command]
 fn invoke_cli(args: Vec<String>) -> Result<CliResult, String> {
-    /* 为了防御性，args 里不允许包含 shell 特殊字符（防命令注入） */
-    for arg in &args {
-        if arg.contains('\'') || arg.contains('`') || arg.contains('$') {
-            return Err(format!("参数包含非法字符: {}", arg));
-        }
-    }
+    validate_args(&args)?;
 
     /* 拼接完整命令行：aitools <arg1> <arg2> ... */
     let joined_args = args.join(" ");
@@ -64,7 +83,7 @@ fn invoke_cli(args: Vec<String>) -> Result<CliResult, String> {
     })
 }
 
-/// 检查 aitools CLI 是否可用
+/// Tauri command：检查 aitools CLI 是否可用
 ///
 /// 独立命令，用于桌面 App 启动时做"健康检查"，
 /// 若返回 false，首页 Dashboard 展示"未检测到 aitools"空态。
@@ -81,6 +100,144 @@ fn check_cli_available() -> bool {
     }
 }
 
+/// 流式事件：单行原始 stdout（NDJSON 的一行）
+///
+/// 前端监听 `cli-stream://{stream_id}` 频道接收。
+/// 前端侧已有 NDJSON 解析器，所以这里只做"按行 emit"，不做 JSON 解析，
+/// 避免 Rust 侧与 TS 侧类型重复维护。
+#[derive(Clone, serde::Serialize)]
+struct CliStreamLine {
+    /// NDJSON 的一行原文（不含换行符）
+    line: String,
+}
+
+/// 流式事件：CLI 执行结束
+#[derive(Clone, serde::Serialize)]
+struct CliStreamDone {
+    /// 进程退出码
+    exit_code: i32,
+    /// 完整的 stderr（用于错误场景展示；GUI 优先用 stdout 的 error 事件）
+    stderr: String,
+}
+
+/// Tauri command：流式调用 aitools CLI
+///
+/// 用法：
+/// - 前端生成唯一 `stream_id`（如 `Date.now().toString()`）
+/// - 调用前先 `listen('cli-stream://' + stream_id, handler)`
+/// - 前端按行收到 `CliStreamLine`，再按行 `JSON.parse`
+/// - 最终收到 `cli-stream-done://' + stream_id`（`CliStreamDone`）
+///
+/// 设计要点：
+/// - 逐行读取 stdout，每读一行立即 emit，保证 GUI 能感知 progress 事件的实时节奏
+/// - stderr 一次性收集在末尾 emit（reporter 在 JSON 模式下 stderr 只放 warn/error 文本，量小）
+/// - 进程在后台线程执行，不阻塞 Tauri 主线程
+///
+/// ### 参数
+/// - `args`：传给 aitools 的参数数组（不含 `--json`，该函数内部会自动加）
+/// - `stream_id`：前端生成的本次调用唯一 ID，用于多次同步并发时区分频道
+#[tauri::command]
+fn invoke_cli_stream(
+    app: AppHandle,
+    args: Vec<String>,
+    stream_id: String,
+) -> Result<(), String> {
+    validate_args(&args)?;
+
+    /* stream_id 本身也要做白名单校验（它会出现在 event 名里） */
+    if !stream_id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err(format!("非法的 stream_id: {}", stream_id));
+    }
+
+    /* 统一补上 --json flag */
+    let mut full_args = vec!["--json".to_string()];
+    full_args.extend(args);
+    let joined = full_args.join(" ");
+    let full_cmd = format!("aitools {}", joined);
+
+    /* 启动子进程：登录 shell 保证 PATH 完整 */
+    let mut child = Command::new("sh")
+        .arg("-lc")
+        .arg(&full_cmd)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("启动 shell 失败: {}", e))?;
+
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "无法获取子进程 stdout".to_string())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "无法获取子进程 stderr".to_string())?;
+
+    /* event 频道名：带上 stream_id，支持并发调用 */
+    let line_event = format!("cli-stream://{}", stream_id);
+    let done_event = format!("cli-stream-done://{}", stream_id);
+
+    /* 后台线程：按行读取 stdout 并 emit */
+    let app_for_stdout = app.clone();
+    let line_event_for_stdout = line_event.clone();
+    thread::spawn(move || {
+        let reader = BufReader::new(stdout);
+        for line_result in reader.lines() {
+            match line_result {
+                Ok(line) => {
+                    if line.trim().is_empty() {
+                        continue;
+                    }
+                    /* emit 失败不致命：可能窗口关闭了，直接停止循环 */
+                    if app_for_stdout
+                        .emit(&line_event_for_stdout, CliStreamLine { line })
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    /* 后台线程：等待进程结束 + 收集 stderr + emit done */
+    let app_for_done = app.clone();
+    thread::spawn(move || {
+        /* 先把 stderr 全部读出来（避免管道满导致子进程阻塞） */
+        let mut stderr_buf = String::new();
+        let mut stderr_reader = BufReader::new(stderr);
+        let mut line = String::new();
+        while let Ok(n) = stderr_reader.read_line(&mut line) {
+            if n == 0 {
+                break;
+            }
+            stderr_buf.push_str(&line);
+            line.clear();
+        }
+
+        /* 再 wait 子进程 */
+        let exit_code = match child.wait() {
+            Ok(status) => status.code().unwrap_or(-1),
+            Err(_) => -1,
+        };
+
+        /* emit done 事件；失败忽略 */
+        let _ = app_for_done.emit(
+            &done_event,
+            CliStreamDone {
+                exit_code,
+                stderr: stderr_buf,
+            },
+        );
+    });
+
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -95,7 +252,11 @@ pub fn run() {
             Ok(())
         })
         /* 注册可供前端 invoke 的命令集 */
-        .invoke_handler(tauri::generate_handler![invoke_cli, check_cli_available])
+        .invoke_handler(tauri::generate_handler![
+            invoke_cli,
+            check_cli_available,
+            invoke_cli_stream
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

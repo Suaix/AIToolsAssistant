@@ -1,5 +1,6 @@
 /**
  * Scaffold（源目录骨架生成）单元测试
+ * v0.4.0：扁平骨架，4 个叶子目录（skills/commands/agents/rules）
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs/promises';
@@ -18,33 +19,24 @@ afterEach(async () => {
 });
 
 /**
- * 验证骨架下 8 个叶子目录（4 类型 × 2 scope）都存在
+ * 验证骨架下 4 个叶子目录（扁平）都存在
  */
 async function assertAllLeafDirsExist(baseDir: string): Promise<void> {
-  const expected = [
-    'skills/user',
-    'skills/project',
-    'commands/user',
-    'commands/project',
-    'agents/user',
-    'agents/project',
-    'rules/user',
-    'rules/project',
-  ];
+  const expected = ['skills', 'commands', 'agents', 'rules'];
   for (const rel of expected) {
     const stat = await fs.stat(path.join(baseDir, rel));
     expect(stat.isDirectory()).toBe(true);
   }
 }
 
-describe('ensureResourceSkeleton', () => {
-  it('空目录下创建全部 8 个叶子目录', async () => {
+describe('ensureResourceSkeleton（v0.4 扁平骨架）', () => {
+  it('空目录下创建全部 4 个叶子目录', async () => {
     const sourceDir = path.join(tempDir, 'source');
 
     const result = await ensureResourceSkeleton(sourceDir);
 
-    expect(result.directories).toHaveLength(8);
-    expect(result.created).toHaveLength(8);
+    expect(result.directories).toHaveLength(4);
+    expect(result.created).toHaveLength(4);
     expect(result.skipped).toHaveLength(0);
 
     await assertAllLeafDirsExist(sourceDir);
@@ -62,22 +54,22 @@ describe('ensureResourceSkeleton', () => {
 
   it('已存在部分骨架时跳过已有目录，补齐缺失目录', async () => {
     const sourceDir = path.join(tempDir, 'source');
-    /* 先手动创建 skills/user */
-    await fs.mkdir(path.join(sourceDir, 'skills', 'user'), { recursive: true });
+    /* 先手动创建 skills/ */
+    await fs.mkdir(path.join(sourceDir, 'skills'), { recursive: true });
 
     const result = await ensureResourceSkeleton(sourceDir);
 
-    expect(result.directories).toHaveLength(8);
-    expect(result.created).toHaveLength(7); /* 7 个新建 */
+    expect(result.directories).toHaveLength(4);
+    expect(result.created).toHaveLength(3); /* 3 个新建 */
     expect(result.skipped).toHaveLength(1); /* 1 个已存在 */
-    expect(result.skipped[0]).toContain(path.join('skills', 'user'));
+    expect(result.skipped[0]).toContain('skills');
 
     await assertAllLeafDirsExist(sourceDir);
   });
 
   it('已有业务文件不受影响', async () => {
     const sourceDir = path.join(tempDir, 'source');
-    const existingSkill = path.join(sourceDir, 'skills', 'user', 'my-skill');
+    const existingSkill = path.join(sourceDir, 'skills', 'my-skill');
     await fs.mkdir(existingSkill, { recursive: true });
     await fs.writeFile(path.join(existingSkill, 'SKILL.md'), '# keep me', 'utf-8');
 
@@ -99,6 +91,6 @@ describe('ensureResourceSkeleton', () => {
     const result = await ensureResourceSkeleton(sourceDir);
 
     expect(result.created).toHaveLength(0);
-    expect(result.skipped).toHaveLength(8);
+    expect(result.skipped).toHaveLength(4);
   });
 });

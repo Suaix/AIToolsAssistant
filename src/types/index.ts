@@ -18,6 +18,10 @@ export type ResourceType = 'skills' | 'commands' | 'agents' | 'rules';
  * 资源层级范围
  * - user：用户级，同步到用户主目录下的 AI 工具目录
  * - project：项目级，同步到当前项目目录下的 AI 工具目录
+ *
+ * @deprecated v0.4 引入订阅模型后，"层级"不再是资源的属性，而是订阅关系的属性。
+ * 本类型将在 v0.4.0 的 PR-2 中正式删除。新代码请直接使用下方的
+ * `SubscriptionScope`（含义相同但语义由"资源属性"变为"订阅落点"）。
  */
 export type ResourceScope = 'user' | 'project';
 
@@ -34,7 +38,13 @@ export interface ResourceInfo {
   path: string;
   /** 资源文件夹名（即目录名） */
   dirName: string;
-  /** 资源所属层级（user/project） */
+  /**
+   * 资源所属层级（user/project）
+   *
+   * @deprecated v0.4 订阅模型引入后，资源本身不再有"层级"属性。
+   * 该字段将在 PR-2 的扫描逻辑重写中移除。当前保留仅为让 PR-1
+   * 可独立编译通过；新代码请勿依赖该字段。
+   */
   scope: ResourceScope;
   /** 资源类型 */
   type: ResourceType;
@@ -43,6 +53,8 @@ export interface ResourceInfo {
 /**
  * 资源处理器接口
  * 每种资源类型实现该接口，封装扫描/路径推导/主文件识别等差异化行为
+ *
+ * v0.4.0：`scan()` 移除 `scope` 参数，从扁平的 `<source>/<resourceDirName>/<name>/` 读取
  */
 export interface ResourceHandler {
   /** 资源类型 */
@@ -51,18 +63,102 @@ export interface ResourceHandler {
   implemented: boolean;
   /**
    * 在源目录和目标目录中使用的子目录名
-   * 例如 skills → 'skills'；源路径 <source>/skills/<scope>/<name>/；目标路径 <user_base>/skills/<name>/
+   * 例如 skills → 'skills'；源路径 <source>/skills/<name>/；目标路径 <user_base>/skills/<name>/
    */
   resourceDirName: string;
   /** 资源类型的展示名称（用于日志输出，如 'Skills'） */
   displayName: string;
   /**
-   * 扫描指定 scope 下的资源列表
+   * 扫描源目录下该类型的所有资源
+   * v0.4.0：从 `<sourceDir>/<resourceDirName>/` 扁平读取，不再按 scope 分层
    * @param sourceDir 源目录根路径（已展开 ~）
-   * @param scope 资源层级（user/project）
-   * @returns 该 scope 下所有有效资源的元数据数组
+   * @returns 所有有效资源的元数据数组；目录不存在时返回空数组
    */
-  scan(sourceDir: string, scope: ResourceScope): Promise<ResourceInfo[]>;
+  scan(sourceDir: string): Promise<ResourceInfo[]>;
+}
+
+/* ============================================================
+ * 订阅模型（v0.4.0 引入）
+ * 定义：一个「订阅」= 把一个资源同步到一个「位置」的声明
+ * 详见 docs/rfcs/v0.4.0-subscription-model.md
+ * ============================================================ */
+
+/**
+ * 订阅落点类型
+ * - user：全局用户级（由 `~/.aitools/config.yaml` 的 user_subscriptions 声明）
+ * - project：项目级（由 `<project>/.aitools/project.yaml` 声明）
+ *
+ * 与 v0.2 的 `ResourceScope` 字面值相同，但语义不同：
+ * - `ResourceScope` 曾是"资源的物理分层"（挂在源目录结构上）
+ * - `SubscriptionScope` 是"订阅关系的落点"（挂在订阅清单里）
+ */
+export type SubscriptionScope = 'user' | 'project';
+
+/**
+ * 用户级订阅清单
+ * 存储在 `~/.aitools/config.yaml` 的 `user_subscriptions` 字段
+ * 按资源类型分组，记录该类型下"要同步到所有已启用 target 用户级目录"的资源名
+ */
+export interface UserSubscriptions {
+  /** 已订阅到用户级的 skills 资源名（dirName）列表 */
+  skills: string[];
+  /** 已订阅到用户级的 commands 资源名列表（预留） */
+  commands?: string[];
+  /** 已订阅到用户级的 agents 资源名列表（预留） */
+  agents?: string[];
+  /** 已订阅到用户级的 rules 资源名列表（预留） */
+  rules?: string[];
+}
+
+/**
+ * 单个资源在某个目标的单次同步状态
+ * 用于"资源视图"中展示"本订阅位置下、各 target 的同步情况"
+ */
+export interface SubscriptionTargetStatus {
+  /** 目标工具名（对应 `Target.name`，如 'codebuddy'） */
+  target: string;
+  /** 在该目标的同步状态 */
+  status: 'synced' | 'changed' | 'not_synced';
+  /** 该资源在目标中的绝对路径（不存在时仍给出推导路径） */
+  targetPath: string;
+}
+
+/**
+ * 单个订阅位置的展开状态
+ * 对应"一个资源的一条订阅声明"展开后，在所有参与 target 下的同步状态集合
+ */
+export interface SubscriptionStatus {
+  /** 订阅落点类型 */
+  scope: SubscriptionScope;
+  /**
+   * 项目目录的绝对路径
+   * 仅 `scope === 'project'` 时有值；`scope === 'user'` 时缺省
+   */
+  projectDir?: string;
+  /** 本订阅位置下、各 target 的同步状态 */
+  targets: SubscriptionTargetStatus[];
+}
+
+/**
+ * 一个资源的完整视图
+ * list 命令与 GUI 卡片都以此为单一数据结构
+ * 一个资源可以有 0~N 条订阅（`subscriptions.length === 0` 表示"候选未订阅"）
+ */
+export interface ResourceView {
+  /** 资源名称（优先取 frontmatter 中的 name） */
+  name: string;
+  /** 资源文件夹名 */
+  dirName: string;
+  /** 资源描述 */
+  description: string;
+  /** 资源类型 */
+  type: ResourceType;
+  /** 资源文件夹的绝对路径 */
+  path: string;
+  /** 资源文件夹的 SHA-256 hash（用于变更检测） */
+  sourceHash: string;
+  /** 该资源的所有订阅位置；空数组表示源目录中存在但未被任何位置订阅 */
+  subscriptions: SubscriptionStatus[];
 }
 
 /* ============================================================
@@ -108,6 +204,11 @@ export interface Config {
   targets: Target[];
   /** 同步选项 */
   sync: SyncOptions;
+  /**
+   * 用户级订阅清单（v0.4 新增）
+   * 记录"要自动同步到所有启用 target 用户级目录"的资源
+   */
+  user_subscriptions: UserSubscriptions;
 }
 
 /* ============================================================
@@ -220,16 +321,41 @@ export interface ResourceListItem {
 
 /**
  * list 命令 JSON 输出的 data 载荷
+ *
+ * v0.4.0：
+ * - 每种资源类型 emit **一条** list 事件（不再按 scope 拆分为 user/project 两条）
+ * - `resources` 数组的每一项是完整 `ResourceView`，自带订阅清单
+ * - 新增 `version: 2` 字段，供 GUI 做协议版本兼容
+ * - 删除 v0.3 的顶层 `scope` 字段（原语义已被 ResourceView.subscriptions 承载）
+ *
+ * 详见 RFC-001 §3.2
  */
 export interface ListEventData {
+  /** 事件协议版本（v0.4.0 起为 2） */
+  version: 2;
   /** 资源类型 */
   type: ResourceType;
-  /** 资源层级：user / project */
-  scope: ResourceScope;
-  /** 该层级下所有资源及其同步状态 */
-  resources: ResourceListItem[];
-  /** 已启用目标列表（帮助 GUI 建立列头） */
+  /** 本类型下的所有资源视图（含订阅与状态） */
+  resources: ResourceView[];
+  /** 已启用目标名列表（帮助 GUI 建立列头） */
   enabledTargets: string[];
+  /**
+   * 当前 cwd 对应的项目路径
+   * 仅当 `<cwd>/.aitools/project.yaml` 存在时有值；
+   * GUI 可据此判断"项目级订阅"一列是否可显示
+   */
+  projectDir?: string;
+}
+
+/**
+ * 订阅位置的 JSON 表达
+ * v0.4.0：所有 sync 事件用该对象描述订阅落点（取代原有顶层 `scope` 字段）
+ */
+export interface SyncLocationData {
+  /** 落点类型 */
+  scope: SubscriptionScope;
+  /** 项目绝对路径（scope=project 时有值） */
+  projectDir?: string;
 }
 
 /**
@@ -239,28 +365,36 @@ export type SyncEventType = 'start' | 'progress' | 'summary' | 'done' | 'error';
 
 /**
  * start 事件载荷：同步任务开始
+ *
+ * v0.4.0：删除顶层 `scope` 字段，改用 `location`；新增 `version: 2`
  */
 export interface SyncStartData {
+  /** 事件协议版本（v0.4.0 起为 2） */
+  version: 2;
   /** 资源类型 */
   type: ResourceType;
-  /** 层级：user / project */
-  scope: ResourceScope;
+  /** 订阅落点（同一个资源在不同落点会发多次 start） */
+  location: SyncLocationData;
   /** 本次将要处理的资源总数（resource × target 的总次数） */
   total: number;
-  /** 参与的目标列表 */
+  /** 参与的目标名列表 */
   targets: string[];
 }
 
 /**
  * progress 事件载荷：每完成一个"资源 × 目标"项时触发
+ *
+ * v0.4.0：`scope` → `location`
  */
 export interface SyncProgressData {
+  /** 事件协议版本（v0.4.0 起为 2） */
+  version: 2;
   /** 资源名（文件夹名） */
   resource: string;
   /** 目标工具名 */
   target: string;
-  /** 层级 */
-  scope: ResourceScope;
+  /** 订阅落点 */
+  location: SyncLocationData;
   /** 动作：created / updated / skipped / failed */
   action: 'created' | 'updated' | 'skipped' | 'failed';
   /** 当前进度（1-based） */
@@ -273,12 +407,16 @@ export interface SyncProgressData {
 
 /**
  * summary 事件载荷：一次完整 sync 的汇总结果
+ *
+ * v0.4.0：`scope` → `location`
  */
 export interface SyncSummaryData extends SyncSummary {
+  /** 事件协议版本（v0.4.0 起为 2） */
+  version: 2;
   /** 资源类型 */
   type: ResourceType;
-  /** 层级 */
-  scope: ResourceScope;
+  /** 订阅落点 */
+  location: SyncLocationData;
 }
 
 /**

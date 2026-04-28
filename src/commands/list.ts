@@ -1,21 +1,23 @@
 /**
- * list 命令处理模块
- * v0.2.0：按资源类型展示同步状态（用户级 + 项目级两段式）
- * v0.3.0：支持 --json 输出（NDJSON），供 GUI 等机器消费方
- * 支持子命令参数（aitools list skills）与 --type 简写
+ * list 命令处理模块（v0.4.0 PR-5 重写）
+ *
+ * 语义：
+ *   aitools list                 # 所有已实现类型
+ *   aitools list skills          # 仅 skills
+ *   aitools list --type skills   # 同上简写
+ *
+ * 输出：
+ *   JSON 模式：每种类型一个 list 事件，data 含 ResourceView[]
+ *   human 模式：按"未订阅候选 / 用户级订阅 / 项目级订阅"三段呈现
+ *
+ * 参见：RFC-001 §3.2、§4 命令全表
  */
 import fs from 'node:fs/promises';
-import path from 'node:path';
+import pc from 'picocolors';
 import { loadConfig, expandTilde } from '../config/manager.js';
-import { hashDirectory, hashDirectorySafe } from '../core/hasher.js';
-import {
-  getUserTargetDir,
-  getProjectTargetDir,
-  detectProjectTools,
-} from '../core/syncer.js';
 import {
   loadProjectConfig,
-  getProjectResourceList,
+  projectConfigExists,
 } from '../config/project.js';
 import {
   getHandler,
@@ -23,27 +25,36 @@ import {
   listImplementedHandlers,
   listAllTypes,
 } from '../core/resources/registry.js';
+import {
+  buildResourceViews,
+  countUnsynced,
+  splitBySubscribed,
+} from '../core/status.js';
+import {
+  getUserSubsForType,
+  getProjectSubsForType,
+} from '../core/subscriptions.js';
 import { reporter, isJsonMode, emitJson } from '../utils/reporter.js';
 import type {
   Config,
-  ResourceInfo,
-  ResourceListItem,
   ResourceType,
-  SkillSyncStatus,
-  Target,
+  ResourceView,
 } from '../types/index.js';
 
 /**
- * 列表命令的选项参数
+ * list 命令的选项
  */
 interface ListCommandOptions {
-  /** 可选，资源类型简写 */
+  /** --type 简写（等价于位置参数） */
   type?: string;
 }
 
+/* ============================================================
+ * 终端表格工具（复用 v0.3 已有的实现，迁移到本文件顶部）
+ * ============================================================ */
+
 /**
- * 计算字符串在终端中的实际显示宽度
- * CJK 字符占 2 宽度，其他占 1 宽度
+ * 计算字符串在终端中的实际显示宽度（CJK=2）
  */
 function getStringWidth(str: string): number {
   let width = 0;
@@ -63,21 +74,16 @@ function getStringWidth(str: string): number {
   return width;
 }
 
-/**
- * 用空格将字符串填充到指定的终端显示宽度
- */
+/** 用空格把字符串填充到终端显示宽度 */
 function padEndWidth(str: string, targetWidth: number): string {
   const currentWidth = getStringWidth(str);
   const padding = targetWidth - currentWidth;
   return padding > 0 ? str + ' '.repeat(padding) : str;
 }
 
-/**
- * 使用 Unicode Box Drawing 字符渲染对齐表格
- */
+/** Unicode Box 表格渲染 */
 function formatTable(headers: string[], rows: string[][]): string {
   const colCount = headers.length;
-
   const colWidths: number[] = [];
   for (let i = 0; i < colCount; i++) {
     let maxWidth = getStringWidth(headers[i]);
@@ -90,34 +96,23 @@ function formatTable(headers: string[], rows: string[][]): string {
     colWidths.push(maxWidth);
   }
 
-  const separatorCells = colWidths.map((w) => '─'.repeat(w + 2));
-  const topBorder = `┌${separatorCells.join('┬')}┐`;
-  const midBorder = `├${separatorCells.join('┼')}┤`;
-  const botBorder = `└${separatorCells.join('┴')}┘`;
-
+  const sep = colWidths.map((w) => '─'.repeat(w + 2));
+  const top = `┌${sep.join('┬')}┐`;
+  const mid = `├${sep.join('┼')}┤`;
+  const bot = `└${sep.join('┴')}┘`;
   const buildRow = (cells: string[]): string => {
-    const paddedCells = cells.map(
-      (cell, i) => ` ${padEndWidth(cell, colWidths[i])} `,
-    );
-    return `│${paddedCells.join('│')}│`;
+    const pads = cells.map((c, i) => ` ${padEndWidth(c, colWidths[i])} `);
+    return `│${pads.join('│')}│`;
   };
 
-  const lines: string[] = [];
-  lines.push(topBorder);
-  lines.push(buildRow(headers));
-  lines.push(midBorder);
-  for (const row of rows) {
-    lines.push(buildRow(row));
-  }
-  lines.push(botBorder);
-
+  const lines = [top, buildRow(headers), mid];
+  for (const r of rows) lines.push(buildRow(r));
+  lines.push(bot);
   return lines.join('\n');
 }
 
-/**
- * 格式化同步状态为终端展示字符串
- */
-function formatStatus(status: SkillSyncStatus): string {
+/** 同步状态文案 */
+function formatStatus(status: 'synced' | 'changed' | 'not_synced'): string {
   switch (status) {
     case 'synced':
       return '✅ 已同步';
@@ -128,452 +123,281 @@ function formatStatus(status: SkillSyncStatus): string {
   }
 }
 
-/** 资源名称最大显示宽度 */
-const MAX_NAME_WIDTH = 20;
-
-/**
- * 截断资源名称到指定最大宽度
- */
-function truncateName(name: string): string {
-  if (getStringWidth(name) <= MAX_NAME_WIDTH) {
-    return name;
-  }
-  let width = 0;
-  let result = '';
-  for (const char of name) {
-    const code = char.codePointAt(0) ?? 0;
-    const isCJK =
-      (code >= 0x4e00 && code <= 0x9fff) ||
-      (code >= 0x3400 && code <= 0x4dbf) ||
-      (code >= 0x20000 && code <= 0x2a6df) ||
-      (code >= 0xf900 && code <= 0xfaff) ||
-      (code >= 0x2e80 && code <= 0x2eff) ||
-      (code >= 0x3000 && code <= 0x303f) ||
-      (code >= 0xff01 && code <= 0xff60) ||
-      (code >= 0xffe0 && code <= 0xffe6);
-    const charWidth = isCJK ? 2 : 1;
-    if (width + charWidth > MAX_NAME_WIDTH - 3) {
-      break;
-    }
-    width += charWidth;
-    result += char;
-  }
-  return result + '...';
-}
-
-/**
- * 目标工具显示名称映射
- */
-const TARGET_DISPLAY_NAMES: Record<string, string> = {
+/** target 名展示（首字母大写 + 一些美化映射） */
+const TARGET_DISPLAY: Record<string, string> = {
   codebuddy: 'CodeBuddy',
   'claude-code': 'Claude Code',
 };
-
-function getTargetDisplayName(targetName: string): string {
-  return TARGET_DISPLAY_NAMES[targetName] ?? targetName;
+function displayTarget(name: string): string {
+  return TARGET_DISPLAY[name] ?? name;
 }
 
-/**
- * 获取单个资源在单个目标的用户级同步状态
- */
-async function getUserTargetStatus(
-  sourceHash: string,
-  resource: ResourceInfo,
-  target: Target,
-  type: ResourceType,
-): Promise<SkillSyncStatus> {
-  const targetBaseDir = getUserTargetDir(target, type);
-  const targetResourceDir = path.join(targetBaseDir, resource.dirName);
-  const targetHash = await hashDirectorySafe(targetResourceDir);
-
-  if (targetHash === null) {
-    return 'not_synced';
+/** 资源名最大显示宽度（超出截断） */
+const MAX_NAME_WIDTH = 24;
+function truncateName(name: string): string {
+  if (getStringWidth(name) <= MAX_NAME_WIDTH) return name;
+  let width = 0;
+  let out = '';
+  for (const ch of name) {
+    const w = getStringWidth(ch);
+    if (width + w > MAX_NAME_WIDTH - 3) break;
+    width += w;
+    out += ch;
   }
-  return sourceHash === targetHash ? 'synced' : 'changed';
+  return out + '...';
 }
 
-/**
- * 获取单个资源在单个目标的项目级同步状态
- */
-async function getProjectTargetStatus(
-  sourceHash: string,
-  resourceDirName: string,
-  targetName: string,
-  projectDir: string,
-  type: ResourceType,
-): Promise<SkillSyncStatus> {
-  const targetBaseDir = getProjectTargetDir(projectDir, targetName, type);
-  const targetResourceDir = path.join(targetBaseDir, resourceDirName);
-  const targetHash = await hashDirectorySafe(targetResourceDir);
-
-  if (targetHash === null) {
-    return 'not_synced';
-  }
-  return sourceHash === targetHash ? 'synced' : 'changed';
-}
+/* ============================================================
+ * 单类型 list 处理
+ * ============================================================ */
 
 /**
- * 输出单个资源类型的用户级 + 项目级两段式列表
+ * 输出指定类型的 list
  * @param type 资源类型
  * @param config 全局配置
- * @returns 是否存在未同步资源（用于底部提示聚合）
+ * @returns 是否存在"未完全同步"资源（用于底部汇总提示）
  */
-async function listOneType(type: ResourceType, config: Config): Promise<boolean> {
-  const handler = getHandler(type);
-
-  /* 未实现类型：统一输出占位提示 */
-  if (!handler.implemented) {
-    reporter.blank();
-    reporter.warn(`[${type}] 暂未支持，敬请期待`);
-    return false;
-  }
-
-  /* JSON 模式：直接采集数据并 emit 事件，不走彩色表格 */
-  if (isJsonMode()) {
-    return await listOneTypeJson(type, config);
-  }
-
-  const sourceDir = expandTilde(config.source);
-
-  /* 扫描该类型的用户级资源 */
-  const userResources = await handler.scan(sourceDir, 'user');
-
-  const enabledTargets = config.targets.filter((t) => t.enabled);
-  let hasUnsynced = false;
-
-  /* ==================== 用户级表格 ==================== */
-  if (userResources.length === 0) {
-    reporter.blank();
-    reporter.info(
-      `📋 [${type}] 用户级资源为空 (源: ${config.source}/${handler.resourceDirName}/user/)`,
-    );
-  } else {
-    reporter.blank();
-    reporter.info(
-      `📋 [${type}] 用户级资源 (源: ${config.source}/${handler.resourceDirName}/user/)`,
-    );
-    reporter.blank();
-
-    const headers = [
-      '名称',
-      '源 hash',
-      ...enabledTargets.map((t) => getTargetDisplayName(t.name)),
-    ];
-
-    const skillHashMap = new Map<string, string>();
-    const rows: string[][] = [];
-
-    for (const resource of userResources) {
-      const sourceHash = await hashDirectory(resource.path);
-      skillHashMap.set(resource.dirName, sourceHash);
-      const shortHash = sourceHash.slice(0, 8);
-
-      const statusCells: string[] = [];
-      for (const target of enabledTargets) {
-        try {
-          const status = await getUserTargetStatus(
-            sourceHash,
-            resource,
-            target,
-            type,
-          );
-          statusCells.push(formatStatus(status));
-          if (status !== 'synced') {
-            hasUnsynced = true;
-          }
-        } catch {
-          statusCells.push(formatStatus('not_synced'));
-          hasUnsynced = true;
-        }
-      }
-
-      rows.push([truncateName(resource.name), shortHash, ...statusCells]);
-    }
-
-    reporter.raw(formatTable(headers, rows));
-  }
-
-  /* ==================== 项目级表格（自动检测） ==================== */
-  const projectDir = process.cwd();
-  const projectConfig = await loadProjectConfig(projectDir);
-
-  if (!projectConfig) {
-    return hasUnsynced;
-  }
-
-  const associated = getProjectResourceList(projectConfig, type);
-  if (associated.length === 0) {
-    return hasUnsynced;
-  }
-
-  /* 项目关联的资源可能来自 user 或 project scope */
-  const projectScopeList = await handler.scan(sourceDir, 'project');
-  const allSource = [...projectScopeList, ...userResources];
-
-  /* 检测当前项目实际使用的 AI 工具；都没检测到则展示所有已启用目标 */
-  const detectedTargets = detectProjectTools(projectDir, enabledTargets);
-  const projectTargets =
-    detectedTargets.length > 0 ? detectedTargets : enabledTargets;
-
-  if (projectTargets.length === 0) {
-    return hasUnsynced;
-  }
-
-  reporter.blank();
-  reporter.info(`📁 [${type}] 项目级资源 (项目: ${projectDir})`);
-  reporter.blank();
-
-  const projectHeaders = [
-    '名称',
-    '源 hash',
-    ...projectTargets.map((t) => getTargetDisplayName(t.name)),
-  ];
-  const projectRows: string[][] = [];
-
-  for (const resourceName of associated) {
-    const resource = allSource.find((r) => r.dirName === resourceName);
-
-    if (!resource) {
-      /* 源目录中不存在该资源，标注 (源已删除) */
-      const displayName = truncateName(`${resourceName} (源已删除)`);
-      const dashCells = projectTargets.map(() => '-');
-      projectRows.push([displayName, '-', ...dashCells]);
-      hasUnsynced = true;
-      continue;
-    }
-
-    const sourceHash = await hashDirectory(resource.path);
-    const shortHash = sourceHash.slice(0, 8);
-
-    const statusCells: string[] = [];
-    for (const target of projectTargets) {
-      try {
-        const status = await getProjectTargetStatus(
-          sourceHash,
-          resourceName,
-          target.name,
-          projectDir,
-          type,
-        );
-        statusCells.push(formatStatus(status));
-        if (status !== 'synced') {
-          hasUnsynced = true;
-        }
-      } catch {
-        statusCells.push(formatStatus('not_synced'));
-        hasUnsynced = true;
-      }
-    }
-
-    projectRows.push([truncateName(resource.name), shortHash, ...statusCells]);
-  }
-
-  reporter.raw(formatTable(projectHeaders, projectRows));
-
-  return hasUnsynced;
-}
-
-/**
- * JSON 模式下的单类型列表：采集数据并 emit 两个 list 事件（user + project）
- * @param type 资源类型
- * @param config 全局配置
- * @returns 是否存在未同步资源
- */
-async function listOneTypeJson(
+async function listOneType(
   type: ResourceType,
   config: Config,
 ): Promise<boolean> {
   const handler = getHandler(type);
+
+  /* 未实现类型 */
+  if (!handler.implemented) {
+    if (!isJsonMode()) {
+      reporter.blank();
+      reporter.warn(`[${type}] 暂未支持，敬请期待`);
+    }
+    return false;
+  }
+
   const sourceDir = expandTilde(config.source);
-  const enabledTargets = config.targets.filter((t) => t.enabled);
-  let hasUnsynced = false;
-
-  /* ==================== 用户级数据采集 ==================== */
-  const userResources = await handler.scan(sourceDir, 'user');
-  const userItems: ResourceListItem[] = [];
-
-  for (const resource of userResources) {
-    const sourceHash = await hashDirectory(resource.path);
-    const targetStatuses: ResourceListItem['targets'] = [];
-
-    for (const target of enabledTargets) {
-      const targetBaseDir = getUserTargetDir(target, type);
-      const targetResourceDir = path.join(targetBaseDir, resource.dirName);
-      try {
-        const status = await getUserTargetStatus(sourceHash, resource, target, type);
-        targetStatuses.push({
-          name: target.name,
-          status,
-          targetPath: targetResourceDir,
-        });
-        if (status !== 'synced') {
-          hasUnsynced = true;
-        }
-      } catch {
-        targetStatuses.push({
-          name: target.name,
-          status: 'not_synced',
-          targetPath: targetResourceDir,
-        });
-        hasUnsynced = true;
-      }
-    }
-
-    userItems.push({
-      name: resource.name,
-      dirName: resource.dirName,
-      description: resource.description,
-      scope: 'user',
-      path: resource.path,
-      sourceHash,
-      targets: targetStatuses,
-    });
-  }
-
-  emitJson({
-    event: 'list',
-    data: {
-      type,
-      scope: 'user',
-      resources: userItems,
-      enabledTargets: enabledTargets.map((t) => t.name),
-    },
-  });
-
-  /* ==================== 项目级数据采集 ==================== */
   const projectDir = process.cwd();
-  const projectConfig = await loadProjectConfig(projectDir);
+  const hasProjectConfig = await projectConfigExists(projectDir);
+  const projectConfig = hasProjectConfig
+    ? await loadProjectConfig(projectDir)
+    : null;
 
-  if (!projectConfig) {
-    return hasUnsynced;
-  }
+  /* 扫源 + 读订阅清单 */
+  const resources = await handler.scan(sourceDir);
+  const userSubs = getUserSubsForType(config, type);
+  const projectSubs = getProjectSubsForType(projectConfig, type);
+  const enabledTargets = config.targets.filter((t) => t.enabled);
 
-  const associated = getProjectResourceList(projectConfig, type);
-  if (associated.length === 0) {
-    return hasUnsynced;
-  }
-
-  const projectScopeList = await handler.scan(sourceDir, 'project');
-  const allSource = [...projectScopeList, ...userResources];
-
-  const detectedTargets = detectProjectTools(projectDir, enabledTargets);
-  const projectTargets =
-    detectedTargets.length > 0 ? detectedTargets : enabledTargets;
-
-  const projectItems: ResourceListItem[] = [];
-
-  for (const resourceName of associated) {
-    const resource = allSource.find((r) => r.dirName === resourceName);
-
-    if (!resource) {
-      /* 源已删除：用空 hash、所有目标 not_synced 的占位条目 */
-      projectItems.push({
-        name: `${resourceName} (源已删除)`,
-        dirName: resourceName,
-        description: '-',
-        scope: 'project',
-        path: '',
-        sourceHash: '',
-        targets: projectTargets.map((t) => ({
-          name: t.name,
-          status: 'not_synced',
-          targetPath: getProjectTargetDir(projectDir, t.name, type),
-        })),
-      });
-      hasUnsynced = true;
-      continue;
-    }
-
-    const sourceHash = await hashDirectory(resource.path);
-    const targetStatuses: ResourceListItem['targets'] = [];
-
-    for (const target of projectTargets) {
-      const targetBaseDir = getProjectTargetDir(projectDir, target.name, type);
-      const targetResourceDir = path.join(targetBaseDir, resourceName);
-      try {
-        const status = await getProjectTargetStatus(
-          sourceHash,
-          resourceName,
-          target.name,
-          projectDir,
-          type,
-        );
-        targetStatuses.push({
-          name: target.name,
-          status,
-          targetPath: targetResourceDir,
-        });
-        if (status !== 'synced') {
-          hasUnsynced = true;
-        }
-      } catch {
-        targetStatuses.push({
-          name: target.name,
-          status: 'not_synced',
-          targetPath: targetResourceDir,
-        });
-        hasUnsynced = true;
-      }
-    }
-
-    projectItems.push({
-      name: resource.name,
-      dirName: resource.dirName,
-      description: resource.description,
-      scope: 'project',
-      path: resource.path,
-      sourceHash,
-      targets: targetStatuses,
-    });
-  }
-
-  emitJson({
-    event: 'list',
-    data: {
-      type,
-      scope: 'project',
-      resources: projectItems,
-      enabledTargets: projectTargets.map((t) => t.name),
-    },
+  /* 展开 + 计算 */
+  const { views, orphanNames } = await buildResourceViews({
+    type,
+    resourceDirName: handler.resourceDirName,
+    resources,
+    enabledTargets,
+    userSubscriptions: userSubs,
+    projectContext: projectConfig
+      ? { projectDir, subscriptions: projectSubs }
+      : null,
   });
 
+  /* 孤儿订阅提示 */
+  if (orphanNames.length > 0 && !isJsonMode()) {
+    reporter.blank();
+    reporter.warn(
+      `[${type}] 以下订阅指向的资源在源目录中不存在: ${orphanNames.join(', ')}`,
+    );
+  }
+
+  const hasUnsynced = countUnsynced(views) > 0;
+
+  if (isJsonMode()) {
+    emitJson({
+      event: 'list',
+      data: {
+        version: 2,
+        type,
+        resources: views,
+        enabledTargets: enabledTargets.map((t) => t.name),
+        ...(hasProjectConfig ? { projectDir } : {}),
+      },
+    });
+    return hasUnsynced;
+  }
+
+  /* ----- human 输出 ----- */
+  printHumanForType(type, views, enabledTargets, projectDir, hasProjectConfig);
   return hasUnsynced;
 }
 
+/* ============================================================
+ * human 模式输出
+ * ============================================================ */
+
 /**
- * list 命令处理函数
- * @param typeArg commander 位置参数 [type]
- * @param options 命令行选项（含 --type 简写）
+ * human 模式下打印单类型内容
+ */
+function printHumanForType(
+  type: ResourceType,
+  views: ResourceView[],
+  enabledTargets: Config['targets'],
+  projectDir: string,
+  hasProjectConfig: boolean,
+): void {
+  const { subscribed, unsubscribed } = splitBySubscribed(views);
+
+  /* 头部标题 */
+  reporter.blank();
+  reporter.info(pc.bold(`📋 [${type}] 资源清单（共 ${views.length} 个）`));
+
+  /* 无任何资源 */
+  if (views.length === 0) {
+    reporter.blank();
+    reporter.info(
+      `源目录暂无 ${type}。请在 ${'~/.aitools/'}${type}/ 下创建文件夹`,
+    );
+    return;
+  }
+
+  /* ---- 1. 未订阅候选 ---- */
+  if (unsubscribed.length > 0) {
+    reporter.blank();
+    reporter.info(
+      pc.dim(`未订阅候选（${unsubscribed.length} 个；可用 aitools subscribe ${type} <name> 订阅）:`),
+    );
+    for (const v of unsubscribed) {
+      const hashShort = v.sourceHash.slice(0, 8);
+      console.log(
+        `  ${pc.dim('○')} ${truncateName(v.dirName)}  ${pc.dim(hashShort)}  ${pc.dim(v.description)}`,
+      );
+    }
+  }
+
+  /* ---- 2. 用户级订阅表格 ---- */
+  const userSubscribed = subscribed.filter((v) =>
+    v.subscriptions.some((s) => s.scope === 'user'),
+  );
+  if (userSubscribed.length > 0) {
+    reporter.blank();
+    reporter.info(pc.cyan(`用户级订阅（${userSubscribed.length} 个）：`));
+    reporter.blank();
+    const targetNames = enabledTargets.map((t) => t.name);
+    const headers = [
+      '名称',
+      '源 hash',
+      ...targetNames.map((n) => displayTarget(n)),
+    ];
+    const rows: string[][] = [];
+    for (const v of userSubscribed) {
+      const userSub = v.subscriptions.find((s) => s.scope === 'user')!;
+      const statusByTarget = new Map(
+        userSub.targets.map((t) => [t.target, t.status] as const),
+      );
+      const statusCells = targetNames.map((n) => {
+        const st = statusByTarget.get(n);
+        return st ? formatStatus(st) : pc.dim('—');
+      });
+      rows.push([
+        truncateName(v.name),
+        v.sourceHash.slice(0, 8),
+        ...statusCells,
+      ]);
+    }
+    reporter.raw(formatTable(headers, rows));
+  }
+
+  /* ---- 3. 项目级订阅表格 ---- */
+  if (hasProjectConfig) {
+    const projectSubscribed = subscribed.filter((v) =>
+      v.subscriptions.some((s) => s.scope === 'project'),
+    );
+    if (projectSubscribed.length > 0) {
+      reporter.blank();
+      reporter.info(
+        pc.magenta(
+          `项目级订阅（${projectSubscribed.length} 个；项目: ${projectDir}）：`,
+        ),
+      );
+      reporter.blank();
+      /* 项目级订阅展开时使用与 user 相同的 enabledTargets 列头
+         若希望未来按 detectProjectTools 精简列头，可在此处扩展；
+         当前保持简单一致性 */
+      const targetNames = enabledTargets.map((t) => t.name);
+      const headers = [
+        '名称',
+        '源 hash',
+        ...targetNames.map((n) => displayTarget(n)),
+      ];
+      const rows: string[][] = [];
+      for (const v of projectSubscribed) {
+        const projSub = v.subscriptions.find((s) => s.scope === 'project')!;
+        const statusByTarget = new Map(
+          projSub.targets.map((t) => [t.target, t.status] as const),
+        );
+        const statusCells = targetNames.map((n) => {
+          const st = statusByTarget.get(n);
+          return st ? formatStatus(st) : pc.dim('—');
+        });
+        rows.push([
+          truncateName(v.name),
+          v.sourceHash.slice(0, 8),
+          ...statusCells,
+        ]);
+      }
+      reporter.raw(formatTable(headers, rows));
+    }
+  }
+
+  /* ---- 底部：空订阅提示 ---- */
+  if (subscribed.length === 0) {
+    reporter.blank();
+    reporter.info(
+      pc.dim(
+        `当前没有任何 ${type} 订阅。示例:\n` +
+          `  aitools subscribe ${type} <name>              # 订阅到用户级\n` +
+          `  aitools subscribe ${type} <name> --scope project   # 订阅到当前项目`,
+      ),
+    );
+  }
+}
+
+/* ============================================================
+ * CLI 入口
+ * ============================================================ */
+
+/**
+ * list 命令入口
+ * @param typeArg 位置参数 [type]
+ * @param options CLI 选项（含 --type 简写）
  */
 export async function listCommand(
   typeArg: string | undefined,
   options: ListCommandOptions,
 ): Promise<void> {
-  /* 读取全局配置 */
+  /* 读取配置 */
   const config = await loadConfig();
   if (!config) {
+    if (isJsonMode()) {
+      emitJson({ event: 'done', data: { exitCode: 1 } });
+    }
     return;
   }
 
-  /* 校验源目录存在性 */
+  /* 校验源目录 */
   const sourceDir = expandTilde(config.source);
   try {
     const stat = await fs.stat(sourceDir);
     if (!stat.isDirectory()) {
       reporter.error(`源路径不是目录: ${config.source}`);
+      if (isJsonMode()) emitJson({ event: 'done', data: { exitCode: 1 } });
       return;
     }
   } catch {
     reporter.error(`源目录不存在: ${config.source}`);
+    if (isJsonMode()) emitJson({ event: 'done', data: { exitCode: 1 } });
     return;
   }
 
-  /* 解析资源类型参数 */
+  /* 解析 type */
   const raw = (typeArg ?? options.type ?? 'all').toLowerCase();
-
   let types: ResourceType[];
   if (raw === 'all') {
-    /* 列出所有已注册类型（含未实现，未实现类型会提示占位） */
     types = listAllTypes();
   } else if (isValidResourceType(raw)) {
     types = [raw];
@@ -581,48 +405,48 @@ export async function listCommand(
     reporter.error(
       `未知的资源类型: ${raw}。可选值: ${['all', ...listAllTypes()].join(', ')}`,
     );
+    if (isJsonMode()) emitJson({ event: 'done', data: { exitCode: 1 } });
     return;
   }
 
-  /* 检查是否有已启用目标（影响表格列） */
+  /* 检查是否有启用目标 */
   const enabledTargets = config.targets.filter((t) => t.enabled);
-  if (enabledTargets.length === 0) {
+  if (enabledTargets.length === 0 && !isJsonMode()) {
     reporter.warn('没有已启用的同步目标，建议运行 aitools init');
   }
 
-  /* 对 all 场景：只输出已实现类型的表格，未实现类型汇总提示在末尾 */
+  /* 输出每个类型 */
   let aggregateUnsynced = false;
+  let handled = 0;
   if (raw === 'all') {
     for (const handler of listImplementedHandlers()) {
-      const hasUnsynced = await listOneType(handler.type, config);
-      if (hasUnsynced) {
-        aggregateUnsynced = true;
-      }
+      const had = await listOneType(handler.type, config);
+      if (had) aggregateUnsynced = true;
+      handled++;
     }
+    /* 未实现类型汇总（human 模式） */
     const pending = types.filter((t) => !getHandler(t).implemented);
-    if (pending.length > 0) {
+    if (pending.length > 0 && !isJsonMode()) {
       reporter.blank();
-      reporter.warn(`以下资源类型暂未支持：${pending.join(', ')}`);
+      reporter.warn(`以下资源类型暂未支持: ${pending.join(', ')}`);
     }
   } else {
     for (const t of types) {
-      const hasUnsynced = await listOneType(t, config);
-      if (hasUnsynced) {
-        aggregateUnsynced = true;
-      }
+      const had = await listOneType(t, config);
+      if (had) aggregateUnsynced = true;
+      handled++;
     }
   }
 
-  /* 底部提示（仅 human 模式） */
-  if (!isJsonMode()) {
+  /* 底部 human 提示 */
+  if (!isJsonMode() && handled > 0) {
     reporter.blank();
     if (aggregateUnsynced) {
       reporter.info('💡 运行 aitools sync 同步最新变更');
     } else {
-      reporter.success('所有资源已同步到最新状态');
+      reporter.success('所有订阅已是最新状态');
     }
-  } else {
-    /* JSON 模式输出 done 事件 */
+  } else if (isJsonMode()) {
     emitJson({ event: 'done', data: { exitCode: 0 } });
   }
 }

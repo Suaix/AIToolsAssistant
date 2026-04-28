@@ -64,7 +64,7 @@ afterEach(async () => {
 });
 
 /**
- * 创建测试用的全局配置对象（v0.2.0：user_base）
+ * 创建测试用的全局配置对象（v0.4.0：含 user_subscriptions 字段）
  */
 function createTestConfig(): Config {
   return {
@@ -84,6 +84,10 @@ function createTestConfig(): Config {
     sync: {
       default_scope: 'user',
       clean: false,
+    },
+    /* v0.4.0 新增：空订阅清单（本测试文件聚焦同步引擎，不依赖订阅路由） */
+    user_subscriptions: {
+      skills: [],
     },
   };
 }
@@ -279,5 +283,145 @@ describe('syncProjectResources（项目级同步）', () => {
       '.codebuddy/skills/skill-d',
     );
     expect((await fs.stat(codebuddySkillDir)).isDirectory()).toBe(true);
+  });
+});
+
+/* ============================================================
+ * v0.4.0 PR-3：任务驱动引擎 syncTasks
+ * ============================================================ */
+
+import { syncTasks, type TaskProgressEvent } from '../../src/core/syncer.js';
+import type { ExpandedTask } from '../../src/core/subscriptions.js';
+import type { Target } from '../../src/types/index.js';
+
+describe('syncTasks（v0.4 任务驱动引擎）', () => {
+  /**
+   * 构造一个 ExpandedTask：源 skill 已创建 + 推导 targetPath
+   */
+  async function makeTask(
+    skillName: string,
+    targetBaseDir: string,
+    targetName: string,
+    location: ExpandedTask['location'],
+  ): Promise<ExpandedTask> {
+    const skill = await createMockSkill(sourceDir, skillName, `# ${skillName}`);
+    const target: Target = {
+      name: targetName,
+      enabled: true,
+      user_base: targetBaseDir,
+    };
+    return {
+      type: 'skills',
+      resource: skill,
+      location,
+      target,
+      /* 目标绝对路径：<targetBaseDir>/skills/<dirName>/ —— 测试里简化为 <targetBaseDir>/<dirName>/，
+         syncTasks 取 path.dirname(targetPath) 作为 base */
+      targetPath: path.join(targetBaseDir, skillName),
+    };
+  }
+
+  it('空任务列表返回全零 summary', async () => {
+    const summary = await syncTasks([]);
+    expect(summary).toEqual({
+      total: 0,
+      created: 0,
+      updated: 0,
+      skipped: 0,
+      failed: 0,
+    });
+  });
+
+  it('首次同步产生 created 动作', async () => {
+    const targetBase = path.join(userTargetDir, 'codebuddy');
+    const task = await makeTask('skill-a', targetBase, 'codebuddy', {
+      scope: 'user',
+    });
+
+    const summary = await syncTasks([task]);
+
+    expect(summary.total).toBe(1);
+    expect(summary.created).toBe(1);
+    expect(summary.updated).toBe(0);
+    expect(summary.skipped).toBe(0);
+    /* 目标文件真实存在 */
+    const target = path.join(targetBase, 'skill-a', 'SKILL.md');
+    expect((await fs.stat(target)).isFile()).toBe(true);
+  });
+
+  it('源未变时第二次同步应为 skipped', async () => {
+    const targetBase = path.join(userTargetDir, 'codebuddy');
+    const task = await makeTask('skill-b', targetBase, 'codebuddy', {
+      scope: 'user',
+    });
+
+    await syncTasks([task]);
+    const summary2 = await syncTasks([task]);
+
+    expect(summary2.skipped).toBe(1);
+    expect(summary2.created).toBe(0);
+  });
+
+  it('源变更后第二次同步应为 updated', async () => {
+    const targetBase = path.join(userTargetDir, 'codebuddy');
+    const task = await makeTask('skill-c', targetBase, 'codebuddy', {
+      scope: 'user',
+    });
+
+    await syncTasks([task]);
+    /* 改动源 */
+    await fs.writeFile(path.join(task.resource.path, 'SKILL.md'), '# v2');
+    const summary2 = await syncTasks([task]);
+
+    expect(summary2.updated).toBe(1);
+  });
+
+  it('onProgress 按顺序触发，index/total 正确', async () => {
+    const targetBase = path.join(userTargetDir, 'codebuddy');
+    const task1 = await makeTask('skill-d', targetBase, 'codebuddy', {
+      scope: 'user',
+    });
+    const task2 = await makeTask('skill-e', targetBase, 'codebuddy', {
+      scope: 'user',
+    });
+
+    const events: TaskProgressEvent[] = [];
+    await syncTasks([task1, task2], (ev) => events.push(ev));
+
+    expect(events).toHaveLength(2);
+    expect(events[0].index).toBe(1);
+    expect(events[0].total).toBe(2);
+    expect(events[1].index).toBe(2);
+    expect(events[1].total).toBe(2);
+    expect(events[0].task.resource.dirName).toBe('skill-d');
+    expect(events[1].task.resource.dirName).toBe('skill-e');
+  });
+
+  it('project 落点的任务携带 projectDir 信息', async () => {
+    const targetBase = path.join(projectDir, '.codebuddy', 'skills');
+    /* 手工构造：syncTasks 取 dirname(targetPath) 作 base，所以先确保目标结构 */
+    const skill = await createMockSkill(sourceDir, 'skill-p', '# p');
+    const task: ExpandedTask = {
+      type: 'skills',
+      resource: skill,
+      location: { scope: 'project', projectDir },
+      target: {
+        name: 'codebuddy',
+        enabled: true,
+        user_base: path.join(userTargetDir, 'codebuddy'),
+      },
+      targetPath: path.join(targetBase, 'skill-p'),
+    };
+
+    const events: TaskProgressEvent[] = [];
+    const summary = await syncTasks([task], (ev) => events.push(ev));
+
+    expect(summary.created).toBe(1);
+    expect(events[0].task.location.scope).toBe('project');
+    expect(events[0].task.location.projectDir).toBe(projectDir);
+    /* 目标文件落到项目级目录 */
+    expect(
+      (await fs.stat(path.join(targetBase, 'skill-p', 'SKILL.md'))).isFile(),
+    ).toBe(true);
   });
 });

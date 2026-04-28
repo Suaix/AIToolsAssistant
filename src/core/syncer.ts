@@ -2,6 +2,7 @@
  * 同步引擎模块
  * 基于 hash 对比的文件夹全量拷贝同步
  * v0.2.0：支持多资源类型，路径由 handler 的 resourceDirName 推导
+ * v0.4.0：新增 `syncTasks()` 任务驱动引擎（消费 ExpandedTask[]），取代按 scope 拆分的双函数
  */
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
@@ -16,12 +17,12 @@ import type {
   Target,
   ResourceInfo,
   ResourceType,
-  ResourceScope,
   SkillSyncResult,
   SkillTargetSyncResult,
   SyncSummary,
   SyncProgressCallback,
 } from '../types/index.js';
+import type { ExpandedTask } from './subscriptions.js';
 
 /**
  * 递归拷贝整个目录
@@ -120,6 +121,121 @@ async function syncResourceToDir(
   return { targetName, action };
 }
 
+/* ============================================================
+ * v0.4.0：任务驱动同步引擎
+ * 消费订阅展开后的 ExpandedTask[]，对每条任务做 hash 比对 + 按需拷贝
+ * ============================================================ */
+
+/**
+ * ExpandedTask 级别的进度事件（syncTasks 内部专用）
+ * 包含完整 `location` 信息，供 CLI 层转成 v0.4 SyncProgressData
+ */
+export interface TaskProgressEvent {
+  /** 对应的 ExpandedTask（含 resource/target/location） */
+  task: ExpandedTask;
+  /** 动作：created / updated / skipped / failed */
+  action: 'created' | 'updated' | 'skipped' | 'failed';
+  /** 当前进度（1-based） */
+  index: number;
+  /** 总任务数 */
+  total: number;
+  /** 若 action === 'failed'，此处给出原因 */
+  error?: string;
+}
+
+/** 任务进度回调 */
+export type TaskProgressCallback = (event: TaskProgressEvent) => void;
+
+/**
+ * 一批任务的执行结果
+ * 聚合该批次内所有 ExpandedTask 的同步动作统计
+ */
+export interface TasksSummary {
+  /** 总任务数 */
+  total: number;
+  /** 新增数 */
+  created: number;
+  /** 更新数 */
+  updated: number;
+  /** 跳过数 */
+  skipped: number;
+  /** 失败数 */
+  failed: number;
+}
+
+/**
+ * 按 ExpandedTask 列表逐个执行同步
+ *
+ * 特点：
+ * - 不区分 user/project 业务分支——差异已在任务的 `targetPath` 里固化
+ * - 每条任务独立 try/catch，单条失败不中断整批
+ * - 顺序执行（符合 RFC §10 Q4 决策：不引入并发池）
+ *
+ * @param tasks 订阅展开后的任务列表
+ * @param onProgress 每条任务完成时触发的回调（用于 CLI/GUI 流式进度）
+ * @returns 批次汇总结果
+ */
+export async function syncTasks(
+  tasks: ExpandedTask[],
+  onProgress?: TaskProgressCallback,
+): Promise<TasksSummary> {
+  const summary: TasksSummary = {
+    total: tasks.length,
+    created: 0,
+    updated: 0,
+    skipped: 0,
+    failed: 0,
+  };
+
+  let index = 0;
+  for (const task of tasks) {
+    index++;
+
+    try {
+      /**
+       * syncResourceToDir 的第二个参数是"目标基础目录（不含资源 dirName 的层级）"。
+       * ExpandedTask.targetPath 已拼到资源本身的绝对路径，所以这里取其父目录作为 base。
+       */
+      const targetBaseDir = path.dirname(task.targetPath);
+      const result = await syncResourceToDir(
+        task.resource,
+        targetBaseDir,
+        task.target.name,
+      );
+
+      if (result.action === 'created') {
+        summary.created++;
+      } else if (result.action === 'updated') {
+        summary.updated++;
+      } else {
+        summary.skipped++;
+      }
+
+      onProgress?.({
+        task,
+        action: result.action,
+        index,
+        total: tasks.length,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      summary.failed++;
+      logger.error(
+        `同步 ${task.resource.dirName} → ${task.target.name} 失败: ${message}`,
+      );
+      onProgress?.({
+        task,
+        action: 'failed',
+        index,
+        total: tasks.length,
+        error: message,
+      });
+    }
+  }
+
+  return summary;
+}
+
 /**
  * 执行用户级同步
  * 将指定资源类型的所有用户级资源同步到所有已启用目标的 <user_base>/<resource_dir_name>/ 目录
@@ -157,7 +273,8 @@ export async function syncAllResources(
   /* 计算总任务数（resource × target），用于 onProgress 的 index/total */
   const totalTasks = resources.length * targets.length;
   let currentIndex = 0;
-  const scope: ResourceScope = 'user';
+  /* v0.4：onProgress 事件使用新的 location 结构；本旧函数固定 user 落点 */
+  const location = { scope: 'user' as const };
 
   /* 遍历每个资源，同步到每个目标 */
   for (const resource of resources) {
@@ -181,9 +298,10 @@ export async function syncAllResources(
         /* 流式进度回调（GUI 消费） */
         if (onProgress) {
           onProgress({
+            version: 2,
             resource: resource.dirName,
             target: target.name,
-            scope,
+            location,
             action: result.action,
             index: currentIndex,
             total: totalTasks,
@@ -198,9 +316,10 @@ export async function syncAllResources(
         /* 失败也要触发 onProgress（action: 'failed'，附带 error 消息） */
         if (onProgress) {
           onProgress({
+            version: 2,
             resource: resource.dirName,
             target: target.name,
-            scope,
+            location,
             action: 'failed',
             index: currentIndex,
             total: totalTasks,
@@ -323,7 +442,8 @@ export async function syncProjectResources(
   /* 计算总任务数与进度计数器 */
   const totalTasks = resources.length * targets.length;
   let currentIndex = 0;
-  const scope: ResourceScope = 'project';
+  /* v0.4：构造 project 落点的 location，带 projectDir */
+  const location = { scope: 'project' as const, projectDir };
 
   /* 遍历每个资源，同步到每个目标的项目级目录 */
   for (const resource of resources) {
@@ -347,9 +467,10 @@ export async function syncProjectResources(
         /* 流式进度回调 */
         if (onProgress) {
           onProgress({
+            version: 2,
             resource: resource.dirName,
             target: target.name,
-            scope,
+            location,
             action: result.action,
             index: currentIndex,
             total: totalTasks,
@@ -366,9 +487,10 @@ export async function syncProjectResources(
         /* 失败也要触发 onProgress */
         if (onProgress) {
           onProgress({
+            version: 2,
             resource: resource.dirName,
             target: target.name,
-            scope,
+            location,
             action: 'failed',
             index: currentIndex,
             total: totalTasks,
