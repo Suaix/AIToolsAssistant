@@ -62,7 +62,7 @@ fn validate_args(args: &[String]) -> Result<(), String> {
 /// - 进程成功启动但 CLI 自身报错（exit != 0）：返回 Ok，exit_code 非零，
 ///   前端从 stderr 或 stdout 的 error 事件中提取原因
 #[tauri::command]
-fn invoke_cli(args: Vec<String>) -> Result<CliResult, String> {
+fn invoke_cli(args: Vec<String>, cwd: Option<String>) -> Result<CliResult, String> {
     validate_args(&args)?;
 
     /* 拼接完整命令行：aitools <arg1> <arg2> ... */
@@ -70,9 +70,13 @@ fn invoke_cli(args: Vec<String>) -> Result<CliResult, String> {
     let full_cmd = format!("aitools {}", joined_args);
 
     /* 用登录 shell 执行，确保 PATH 完整（nvm/pnpm/volta 等） */
-    let output = Command::new("sh")
-        .arg("-lc")
-        .arg(&full_cmd)
+    let mut cmd = Command::new("sh");
+    cmd.arg("-lc").arg(&full_cmd);
+    /* 若提供 cwd，则设置子进程工作目录（影响 CLI 的 process.cwd()） */
+    if let Some(ref dir) = cwd {
+        cmd.current_dir(dir);
+    }
+    let output = cmd
         .output()
         .map_err(|e| format!("启动 shell 失败: {}", e))?;
 
@@ -141,6 +145,7 @@ fn invoke_cli_stream(
     app: AppHandle,
     args: Vec<String>,
     stream_id: String,
+    cwd: Option<String>,
 ) -> Result<(), String> {
     validate_args(&args)?;
 
@@ -159,11 +164,15 @@ fn invoke_cli_stream(
     let full_cmd = format!("aitools {}", joined);
 
     /* 启动子进程：登录 shell 保证 PATH 完整 */
-    let mut child = Command::new("sh")
-        .arg("-lc")
+    let mut cmd = Command::new("sh");
+    cmd.arg("-lc")
         .arg(&full_cmd)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(ref dir) = cwd {
+        cmd.current_dir(dir);
+    }
+    let mut child = cmd
         .spawn()
         .map_err(|e| format!("启动 shell 失败: {}", e))?;
 
@@ -238,6 +247,58 @@ fn invoke_cli_stream(
     Ok(())
 }
 
+/// Tauri command：确保项目配置存在
+///
+/// 若 `<project_dir>/.aitools/project.yaml` 不存在，则创建最小配置。
+/// 已存在则不做任何操作（幂等）。
+/// GUI 在 scope=project 订阅前调用，避免 CLI JSON 模式跳过创建。
+#[tauri::command]
+fn ensure_project_config(project_dir: String) -> Result<(), String> {
+    let aitools_dir = std::path::Path::new(&project_dir).join(".aitools");
+    let config_path = aitools_dir.join("project.yaml");
+
+    if config_path.exists() {
+        return Ok(());
+    }
+
+    /* 创建 .aitools 目录 */
+    std::fs::create_dir_all(&aitools_dir)
+        .map_err(|e| format!("创建 .aitools 目录失败: {}", e))?;
+
+    /* 写入最小 project.yaml */
+    std::fs::write(&config_path, "skills: []\n")
+        .map_err(|e| format!("写入 project.yaml 失败: {}", e))?;
+
+    Ok(())
+}
+
+/// Tauri command：打开目录选择对话框
+///
+/// macOS 上通过 osascript 调用 Finder 的 choose folder 对话框，
+/// 返回用户选中的目录绝对路径；用户取消时返回 null。
+/// 不引入额外 Rust 依赖（tauri-plugin-dialog），保持最小化。
+#[tauri::command]
+fn open_directory_dialog() -> Result<Option<String>, String> {
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg("POSIX path of (choose folder with prompt \"选择项目目录\")")
+        .output()
+        .map_err(|e| format!("启动 osascript 失败: {}", e))?;
+
+    if !output.status.success() {
+        /* 用户点了取消，osascript 退出码非零 */
+        return Ok(None);
+    }
+
+    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    /* osascript 返回的路径末尾带 /，去掉 */
+    let path = path.trim_end_matches('/').to_string();
+    if path.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(path))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -255,7 +316,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             invoke_cli,
             check_cli_available,
-            invoke_cli_stream
+            invoke_cli_stream,
+            open_directory_dialog,
+            ensure_project_config
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

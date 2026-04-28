@@ -12,65 +12,110 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
 /* ============================================================
- * 类型定义（对齐 CLI 的 src/types/index.ts）
+ * 类型定义（对齐 CLI v0.4 的 src/types/index.ts）
  * ============================================================ */
 
 /** 资源类型 */
 export type ResourceType = 'skills' | 'commands' | 'agents' | 'rules';
 
-/** 资源层级 */
-export type ResourceScope = 'user' | 'project';
+/** 订阅落点类型（v0.4：取代旧的 ResourceScope） */
+export type SubscriptionScope = 'user' | 'project';
 
 /** 单个资源对单个目标的同步状态 */
 export type SyncStatus = 'synced' | 'changed' | 'not_synced';
 
-/** 单个资源在 list 命令中的条目 */
-export interface ResourceListItem {
+/**
+ * 单个 target 的同步状态（v0.4 新结构）
+ */
+export interface SubscriptionTargetStatus {
+  /** 目标工具名（如 'codebuddy'） */
+  target: string;
+  /** 在该目标的同步状态 */
+  status: SyncStatus;
+  /** 该资源在目标中的绝对路径 */
+  targetPath: string;
+}
+
+/**
+ * 单条订阅的展开状态（v0.4 新结构）
+ */
+export interface SubscriptionStatus {
+  /** 订阅落点类型 */
+  scope: SubscriptionScope;
+  /** 项目目录路径（仅 scope='project' 时有值） */
+  projectDir?: string;
+  /** 本订阅位置下、各 target 的同步状态 */
+  targets: SubscriptionTargetStatus[];
+}
+
+/**
+ * 一个资源的完整视图（v0.4 核心数据结构）
+ * list 命令与 GUI 卡片都以此为单一数据结构
+ */
+export interface ResourceView {
   /** 资源显示名称 */
   name: string;
   /** 资源文件夹名 */
   dirName: string;
   /** 描述（可能为 '-'） */
   description: string;
-  /** 资源层级 */
-  scope: ResourceScope;
+  /** 资源类型 */
+  type: ResourceType;
   /** 源目录的绝对路径 */
   path: string;
-  /** 源目录 hash */
+  /** 资源文件夹的 SHA-256 hash */
   sourceHash: string;
-  /** 各目标的同步状态 */
-  targets: {
-    name: string;
-    status: SyncStatus;
-    targetPath: string;
-  }[];
+  /** 所有订阅位置；空数组表示未被任何位置订阅（候选） */
+  subscriptions: SubscriptionStatus[];
 }
 
-/** list 事件载荷 */
+/**
+ * 订阅位置的 JSON 表达（v0.4 sync 事件用于描述落点）
+ */
+export interface SyncLocationData {
+  /** 落点类型 */
+  scope: SubscriptionScope;
+  /** 项目路径（scope=project 时有值） */
+  projectDir?: string;
+}
+
+/** list 事件载荷（v0.4 协议 version: 2） */
 export interface ListEventData {
+  /** 事件协议版本 */
+  version: 2;
+  /** 资源类型 */
   type: ResourceType;
-  scope: ResourceScope;
-  resources: ResourceListItem[];
+  /** 本类型下的所有资源视图 */
+  resources: ResourceView[];
+  /** 已启用目标名列表 */
   enabledTargets: string[];
+  /** 当前 cwd 对应的项目路径（仅当 project.yaml 存在时有值） */
+  projectDir?: string;
 }
 
-/** sync start 事件载荷（单次 sync 起点） */
+/** sync start 事件载荷（v0.4：scope → location） */
 export interface SyncStartData {
+  /** 事件协议版本 */
+  version: 2;
   type: ResourceType;
-  scope: ResourceScope;
+  /** 订阅落点 */
+  location: SyncLocationData;
   /** 本次将要处理的任务总数（resource × target） */
   total: number;
   /** 参与的目标名列表 */
   targets: string[];
 }
 
-/** sync progress 事件载荷（每完成一个"资源 × 目标"触发一次） */
+/** sync progress 事件载荷（v0.4：scope → location） */
 export interface SyncProgressData {
+  /** 事件协议版本 */
+  version: 2;
   /** 资源名（文件夹名） */
   resource: string;
   /** 目标工具名 */
   target: string;
-  scope: ResourceScope;
+  /** 订阅落点 */
+  location: SyncLocationData;
   /** 动作：created / updated / skipped / failed */
   action: 'created' | 'updated' | 'skipped' | 'failed';
   /** 当前进度（1-based） */
@@ -81,17 +126,20 @@ export interface SyncProgressData {
   error?: string;
 }
 
-/** sync summary 事件载荷（一次 sync 的汇总结果） */
+/** sync summary 事件载荷（v0.4：scope → location） */
 export interface SyncSummaryData {
+  /** 事件协议版本 */
+  version: 2;
   type: ResourceType;
-  scope: ResourceScope;
+  /** 订阅落点 */
+  location: SyncLocationData;
   totalSkills: number;
   created: number;
   updated: number;
   skipped: number;
 }
 
-/** 所有 CLI JSON 事件的联合类型 */
+/** 所有 CLI JSON 事件的联合类型（v0.4：新增 target.enabled / target.disabled） */
 export type JsonEvent =
   | { event: 'list'; data: ListEventData }
   | { event: 'start'; data: SyncStartData }
@@ -99,6 +147,8 @@ export type JsonEvent =
   | { event: 'summary'; data: SyncSummaryData }
   | { event: 'done'; data: { exitCode: number } }
   | { event: 'error'; data: { message: string; code?: string } }
+  | { event: 'target.enabled'; data: { name: string; changed: boolean } }
+  | { event: 'target.disabled'; data: { name: string; changed: boolean } }
   | { event: string; data: unknown };
 
 /* ============================================================
@@ -124,11 +174,14 @@ interface CliResult {
  * @example
  *   const events = await invokeCli(['list', 'skills']);
  */
-export async function invokeCli(args: string[]): Promise<JsonEvent[]> {
+export async function invokeCli(args: string[], cwd?: string): Promise<JsonEvent[]> {
   /* 统一补上 --json flag；放在最前面符合 CLI 的全局 flag 习惯 */
   const fullArgs = ['--json', ...args];
 
-  const result = await invoke<CliResult>('invoke_cli', { args: fullArgs });
+  const result = await invoke<CliResult>('invoke_cli', {
+    args: fullArgs,
+    cwd: cwd ?? null,
+  });
 
   /* 进程层面失败：抛异常供上层捕获 */
   if (result.exit_code !== 0 && !result.stdout) {
@@ -200,25 +253,27 @@ export class CliError extends Error {
  * ============================================================ */
 
 /**
- * 单个类型的资源列表查询结果
- * 合并了 user 与 project 两段（CLI 通过两个 list 事件分别发出）
+ * 单个类型的资源列表查询结果（v0.4：统一为单段 resources）
  */
 export interface ResourceListResult {
-  /** 用户级资源 */
-  userResources: ResourceListItem[];
-  /** 项目级资源（仅当 cwd 有 .aitools/project.yaml 时非空） */
-  projectResources: ResourceListItem[];
-  /** 已启用目标列表（来自 user 段的 enabledTargets） */
+  /** 所有资源视图（含订阅与同步状态） */
+  resources: ResourceView[];
+  /** 已启用目标列表 */
   enabledTargets: string[];
+  /** 当前 cwd 对应的项目路径（仅当 project.yaml 存在时有值） */
+  projectDir?: string;
 }
 
 /**
  * 查询指定类型资源的完整列表
  *
- * @param type 资源类型（当前 CLI 仅 'skills' 已实现，其他为占位）
+ * v0.4：CLI 每种类型只输出一条 list 事件，不再按 scope 拆分
+ *
+ * @param type 资源类型
+ * @param cwd 可选的工作目录（影响 CLI 的项目级订阅检测）
  */
-export async function listResources(type: ResourceType): Promise<ResourceListResult> {
-  const events = await invokeCli(['list', type]);
+export async function listResources(type: ResourceType, cwd?: string): Promise<ResourceListResult> {
+  const events = await invokeCli(['list', type], cwd);
 
   /* 先检查是否有 error 事件 */
   const errorEvent = events.find((e): e is Extract<JsonEvent, { event: 'error' }> =>
@@ -228,19 +283,108 @@ export async function listResources(type: ResourceType): Promise<ResourceListRes
     throw new CliError(errorEvent.data.message, -1);
   }
 
-  /* 提取两段 list 事件 */
-  const listEvents = events.filter(
+  /* v0.4：提取唯一一条 list 事件 */
+  const listEvent = events.find(
     (e): e is Extract<JsonEvent, { event: 'list' }> => e.event === 'list',
   );
 
-  const userEvent = listEvents.find((e) => e.data.scope === 'user');
-  const projectEvent = listEvents.find((e) => e.data.scope === 'project');
-
   return {
-    userResources: userEvent?.data.resources ?? [],
-    projectResources: projectEvent?.data.resources ?? [],
-    enabledTargets: userEvent?.data.enabledTargets ?? [],
+    resources: listEvent?.data.resources ?? [],
+    enabledTargets: listEvent?.data.enabledTargets ?? [],
+    projectDir: listEvent?.data.projectDir,
   };
+}
+
+/* ============================================================
+ * 订阅 / 取消订阅操作（v0.4 · RFC-002 阶段 2 新增）
+ * ============================================================ */
+
+/**
+ * 订阅操作的选项
+ */
+export interface SubscribeOptions {
+  /** 资源类型 */
+  type: ResourceType;
+  /** 资源 dirName */
+  name: string;
+  /** 订阅落点 */
+  scope: SubscriptionScope;
+  /** 订阅后是否立即同步 */
+  sync?: boolean;
+  /** 工作目录（scope=project 时应传入项目路径） */
+  cwd?: string;
+}
+
+/**
+ * 订阅一个资源到指定位置
+ */
+export async function subscribeResource(options: SubscribeOptions): Promise<JsonEvent[]> {
+  const args = ['subscribe', options.type, options.name, '--scope', options.scope];
+  if (options.sync) {
+    args.push('--sync');
+  }
+  return await invokeCli(args, options.cwd);
+}
+
+/**
+ * 取消订阅操作的选项
+ */
+export interface UnsubscribeOptions {
+  /** 资源类型 */
+  type: ResourceType;
+  /** 资源 dirName */
+  name: string;
+  /** 订阅落点 */
+  scope: SubscriptionScope;
+  /** 是否清理已同步文件 */
+  prune?: boolean;
+  /** 工作目录（scope=project 时应传入项目路径） */
+  cwd?: string;
+}
+
+/**
+ * 取消订阅一个资源
+ */
+export async function unsubscribeResource(options: UnsubscribeOptions): Promise<JsonEvent[]> {
+  const args = ['unsubscribe', options.type, options.name, '--scope', options.scope];
+  if (options.prune) {
+    args.push('--prune');
+  }
+  return await invokeCli(args, options.cwd);
+}
+
+/* ============================================================
+ * Target 管理（v0.4.2 · RFC-001.1 + RFC-002 阶段 3）
+ * ============================================================ */
+
+/**
+ * 单个 target 在 GUI 中的展示信息
+ * 由 `aitools list --json` 的 enabledTargets 和 config 推导
+ */
+export interface TargetInfo {
+  /** target 名称 */
+  name: string;
+  /** 是否启用 */
+  enabled: boolean;
+  /** 在该 target 上的订阅资源数 */
+  subscriptionCount: number;
+}
+
+/**
+ * 设置 target 的启用/禁用状态
+ *
+ * 生成命令：`aitools target enable|disable <name> --json`
+ * 返回 CLI 输出的事件数组
+ *
+ * @param name target 名称
+ * @param enabled 目标状态（true=启用，false=禁用）
+ */
+export async function setTargetEnabled(
+  name: string,
+  enabled: boolean,
+): Promise<JsonEvent[]> {
+  const subcommand = enabled ? 'enable' : 'disable';
+  return await invokeCli(['target', subcommand, name]);
 }
 
 /* ============================================================
@@ -272,6 +416,7 @@ export interface SyncStreamCallbacks {
 export async function runSyncStream(
   args: string[],
   callbacks: SyncStreamCallbacks,
+  cwd?: string,
 ): Promise<{ unlisten: () => void }> {
   /* 生成唯一 stream_id：时间戳 + 随机后缀（字母数字短横线，符合 Rust 白名单） */
   const streamId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -310,7 +455,7 @@ export async function runSyncStream(
 
   /* 触发 Rust 侧启动子进程；Rust 立即 Ok 返回，真实事件走 listen 频道 */
   try {
-    await invoke('invoke_cli_stream', { args, streamId });
+    await invoke('invoke_cli_stream', { args, streamId, cwd: cwd ?? null });
   } catch (err) {
     /* 启动失败时也要解除监听，避免泄漏 */
     unlistenLine();

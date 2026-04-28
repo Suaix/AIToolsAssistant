@@ -1,30 +1,53 @@
 /**
- * Skills 列表页 · 阶段 4 双向同步
+ * Skills 列表页 · RFC-002 阶段 2 Tab 化
  *
- * 严格遵循设计系统 L2 原则 2「状态先于功能」：
- * 页面有 4 个明确状态 —— 加载中 / 错误 / 空态 / 列表
- * 每种状态都用视觉卡位清晰告知用户当前发生什么。
+ * 遵循设计系统 L2 原则：
+ * - 「状态先于功能」：4 态（loading / error / empty / ready）
+ * - 「明确先于惊喜」：订阅 scope 由用户在 Popover 中显式选择
+ * - 「克制先于全面」：订阅后不自动跳 Tab，只刷新并 toast 提示
  *
- * 阶段 4 新增：
- * - 页面 header 的「同步全部 Skills」主按钮
- * - 每张 Skill 卡内嵌「同步」按钮（按 dirName 精准同步）
- * - SyncProgressModal 承载同步过程
+ * 三段 Tab 归类规则（来自 RFC-002 §3.3）：
+ *   User Subscriptions：至少有一个 subscriptions[scope=user]
+ *   Project Subscriptions：至少有一个 subscriptions[scope=project, projectDir=当前]
+ *   Unused：无任何订阅（或只有其他项目的订阅）
  *
- * 翻译自 docs/design-system/06-gui-prototype/pages/skills.html 的"所有 Skills"区块
- * （搜索栏与同步魔法演示区为后续阶段实现）
+ * 同一资源可能在多个 Tab 都出现——用户看到的是「订阅关系」而非「资源身份」。
  */
 import { useEffect, useState } from 'react';
-import { Package, AlertCircle, Loader2, RefreshCw, ArrowRightCircle } from 'lucide-react';
+import {
+  Package,
+  AlertCircle,
+  Loader2,
+  RefreshCw,
+  ArrowRightCircle,
+  Plus,
+  Trash2,
+} from 'lucide-react';
 import {
   listResources,
-  type ResourceListItem,
+  subscribeResource,
+  unsubscribeResource,
+  type ResourceView,
   type ResourceListResult,
+  type SubscriptionScope,
   type SyncStatus,
   CliError,
 } from '../lib/cli';
 import { SyncProgressModal } from '../components/SyncProgressModal';
+import { SubscribePopover } from '../components/SubscribePopover';
+import { ProjectSwitcher } from '../components/ProjectSwitcher';
+import {
+  loadGuiState,
+  saveGuiState,
+  setCurrentProject,
+  type GuiState,
+} from '../lib/gui-state';
 
-/** 同步状态展示映射（用于 badge 文案） */
+/* ============================================================
+ * 常量映射
+ * ============================================================ */
+
+/** 同步状态展示映射（badge 文案） */
 const STATUS_LABEL: Record<SyncStatus, string> = {
   synced: '已同步',
   changed: '需更新',
@@ -38,40 +61,91 @@ const STATUS_BADGE_CLASS: Record<SyncStatus, string> = {
   not_synced: 'badge--neutral',
 };
 
-/**
- * 同步任务上下文：描述当前 Modal 需要执行什么
- * - kind='all'：同步全部 skills
- * - kind='one'：同步某个 skill（dirName）
- */
+/* ============================================================
+ * 类型定义
+ * ============================================================ */
+
+/** Tab 标识 */
+type TabName = 'user' | 'project' | 'unused';
+
+/** 同步任务上下文 */
 type SyncTask =
   | { kind: 'all' }
   | { kind: 'one'; dirName: string; displayName: string };
+
+/** 正在进行的订阅操作（用于显示 Popover） */
+interface PendingSubscribe {
+  /** 目标资源 dirName */
+  dirName: string;
+  /** 资源显示名 */
+  displayName: string;
+}
+
+/** 正在进行的取消订阅操作（用于显示确认对话框） */
+interface PendingUnsubscribe {
+  /** 目标资源 dirName */
+  dirName: string;
+  /** 资源显示名 */
+  displayName: string;
+  /** 取消订阅的 scope */
+  scope: SubscriptionScope;
+}
+
+/* ============================================================
+ * 主组件
+ * ============================================================ */
 
 /**
  * Skills 页面主组件
  */
 export function Skills() {
-  /** 4 态之一：loading | error | ready */
+  /** 页面状态：loading | error | ready */
   const [status, setStatus] = useState<'loading' | 'error' | 'ready'>('loading');
-  /** 查询结果（ready 状态下有效） */
+  /** 查询结果 */
   const [result, setResult] = useState<ResourceListResult | null>(null);
-  /** 错误消息（error 状态下有效） */
-  const [errorMsg, setErrorMsg] = useState<string>('');
-  /** 当前同步任务；null 表示 Modal 未打开 */
+  /** 错误消息 */
+  const [errorMsg, setErrorMsg] = useState('');
+  /** 当前激活 Tab */
+  const [activeTab, setActiveTab] = useState<TabName>('user');
+  /** 同步任务（控制 SyncProgressModal） */
   const [syncTask, setSyncTask] = useState<SyncTask | null>(null);
+  /** 正在进行的订阅操作（控制 SubscribePopover） */
+  const [pendingSub, setPendingSub] = useState<PendingSubscribe | null>(null);
+  /** 正在进行的取消订阅操作（控制确认对话框） */
+  const [pendingUnsub, setPendingUnsub] = useState<PendingUnsubscribe | null>(null);
+  /** 取消订阅时是否勾选 --prune */
+  const [unsubPrune, setUnsubPrune] = useState(false);
+  /** 操作中（防快速重复点击） */
+  const [busy, setBusy] = useState(false);
+  /** toast 消息 */
+  const [toast, setToast] = useState<{ text: string; kind: 'success' | 'error' } | null>(null);
+  /** GUI 本地状态（项目切换器用） */
+  const [guiState, setGuiState] = useState<GuiState | null>(null);
 
-  /* 首次挂载时加载数据 */
+  /* 首次挂载：加载 GUI 状态 + 数据 */
   useEffect(() => {
+    void (async () => {
+      const gs = await loadGuiState();
+      setGuiState(gs);
+    })();
     void loadData();
   }, []);
 
+  /* toast 自动消失 */
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 3000);
+    return () => clearTimeout(timer);
+  }, [toast]);
+
   /**
    * 从 CLI 加载 skills 数据
+   * @param projectCwd 可选的项目目录（影响 CLI 的项目级订阅检测）
    */
-  async function loadData() {
+  async function loadData(projectCwd?: string) {
     setStatus('loading');
     try {
-      const data = await listResources('skills');
+      const data = await listResources('skills', projectCwd);
       setResult(data);
       setStatus('ready');
     } catch (err) {
@@ -83,6 +157,162 @@ export function Skills() {
             : '未知错误';
       setErrorMsg(message);
       setStatus('error');
+    }
+  }
+
+  /* ============================================================
+   * 项目切换（Skills 页专属）
+   * ============================================================ */
+
+  /** 选择项目 */
+  function handleSelectProject(projectDir: string) {
+    if (!guiState) return;
+    /* 路径规范化：去尾部斜杠，保证与 CLI 输出一致 */
+    const normalized = projectDir.replace(/\/+$/, '');
+    const newState = setCurrentProject(guiState, normalized);
+    setGuiState(newState);
+    void saveGuiState(newState);
+    /* 重新加载数据，让 CLI 以选中的项目目录作为 cwd */
+    void loadData(normalized);
+  }
+
+  /** 打开目录选择器 */
+  async function handleOpenDirectory() {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const selected = await invoke<string | null>('open_directory_dialog');
+      if (selected) handleSelectProject(selected);
+    } catch {
+      const dir = window.prompt('输入项目目录路径：');
+      if (dir) handleSelectProject(dir);
+    }
+  }
+
+  /* ============================================================
+   * 数据分类（Tab 归类）
+   * ============================================================ */
+  const allResources = result?.resources ?? [];
+  /** CLI cwd 检测到的项目路径（用于 hasProjectConfig 判断） */
+  const cliProjectDir = result?.projectDir;
+  /** 用户选中的项目路径（项目级订阅以此为准） */
+  const selectedProject = guiState?.currentProject ?? null;
+
+  /** User Tab：至少有一个 scope=user 的订阅 */
+  const userResources = allResources.filter((r) =>
+    r.subscriptions.some((s) => s.scope === 'user'),
+  );
+  /** Project Tab：以用户选中的项目为准；未选择项目时为空 */
+  const projectResources = selectedProject
+    ? allResources.filter((r) =>
+        r.subscriptions.some(
+          (s) =>
+            s.scope === 'project' &&
+            normalizePath(s.projectDir ?? '') === normalizePath(selectedProject),
+        ),
+      )
+    : [];
+  /** Unused Tab：无任何订阅 */
+  const unusedResources = allResources.filter(
+    (r) => r.subscriptions.length === 0,
+  );
+
+  /* Tab 计数 */
+  const tabCounts: Record<TabName, number> = {
+    user: userResources.length,
+    project: projectResources.length,
+    unused: unusedResources.length,
+  };
+
+  /** 当前 Tab 对应的资源列表 */
+  function getTabResources(): ResourceView[] {
+    switch (activeTab) {
+      case 'user':
+        return userResources;
+      case 'project':
+        return projectResources;
+      case 'unused':
+        return unusedResources;
+    }
+  }
+
+  /* ============================================================
+   * 订阅操作
+   * ============================================================ */
+
+  /**
+   * 执行订阅
+   */
+  async function handleSubscribe(scope: SubscriptionScope, sync: boolean) {
+    if (!pendingSub || busy) return;
+    setBusy(true);
+    setPendingSub(null);
+    try {
+      /* scope=project 时，先确保项目配置存在（CLI JSON 模式不会自动创建） */
+      if (scope === 'project' && selectedProject) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        await invoke('ensure_project_config', { projectDir: selectedProject });
+      }
+      const events = await subscribeResource({
+        type: 'skills',
+        name: pendingSub.dirName,
+        scope,
+        sync,
+        cwd: scope === 'project' && selectedProject ? selectedProject : undefined,
+      });
+      /* 检查是否有错误 */
+      const errEvt = events.find((e) => e.event === 'error');
+      if (errEvt) {
+        const msg = (errEvt.data as { message: string }).message;
+        setToast({ text: msg, kind: 'error' });
+      } else {
+        const scopeLabel = scope === 'user' ? '用户级' : '项目级';
+        setToast({
+          text: `已订阅「${pendingSub.displayName}」到${scopeLabel}`,
+          kind: 'success',
+        });
+      }
+      /* 刷新列表 */
+      await loadData(selectedProject ?? undefined);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setToast({ text: `订阅失败：${msg}`, kind: 'error' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * 执行取消订阅
+   */
+  async function handleUnsubscribe() {
+    if (!pendingUnsub || busy) return;
+    setBusy(true);
+    setPendingUnsub(null);
+    try {
+      const events = await unsubscribeResource({
+        type: 'skills',
+        name: pendingUnsub.dirName,
+        scope: pendingUnsub.scope,
+        prune: unsubPrune,
+        cwd: pendingUnsub.scope === 'project' && selectedProject ? selectedProject : undefined,
+      });
+      const errEvt = events.find((e) => e.event === 'error');
+      if (errEvt) {
+        const msg = (errEvt.data as { message: string }).message;
+        setToast({ text: msg, kind: 'error' });
+      } else {
+        setToast({
+          text: `已取消订阅「${pendingUnsub.displayName}」`,
+          kind: 'success',
+        });
+      }
+      setUnsubPrune(false);
+      await loadData(selectedProject ?? undefined);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setToast({ text: `取消订阅失败：${msg}`, kind: 'error' });
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -127,14 +357,9 @@ export function Skills() {
   }
 
   /* ============================================================
-   * 状态 3 & 4：ready
+   * 状态 3：空态
    * ============================================================ */
-  const userResources = result?.userResources ?? [];
-  const projectResources = result?.projectResources ?? [];
-  const totalCount = userResources.length + projectResources.length;
-
-  /* ---- 状态 3：空态（CLI 调用成功，但源目录里没有 Skills） ---- */
-  if (totalCount === 0) {
+  if (allResources.length === 0) {
     return (
       <div className="empty-state">
         <Package className="empty-state__icon" size={64} aria-hidden="true" />
@@ -146,10 +371,14 @@ export function Skills() {
     );
   }
 
-  /* ---- 状态 4：有数据，正常渲染 ---- */
+  /* ============================================================
+   * 状态 4：有数据，Tab 化渲染
+   * ============================================================ */
+  const currentResources = getTabResources();
+
   return (
     <div>
-      {/* 页面 header：标题 + 动作区（同屏仅 1 个 primary） */}
+      {/* 页面 header */}
       <div
         style={{
           display: 'flex',
@@ -160,17 +389,27 @@ export function Skills() {
         }}
       >
         <div>
-          <h1
-            style={{
-              fontSize: 'var(--text-h1-size)',
-              fontWeight: 'var(--text-h1-weight)',
-              lineHeight: 'var(--text-h1-line)',
-              color: 'var(--color-text-primary)',
-              margin: 0,
-            }}
-          >
-            Skills
-          </h1>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
+            <h1
+              style={{
+                fontSize: 'var(--text-h1-size)',
+                fontWeight: 'var(--text-h1-weight)',
+                lineHeight: 'var(--text-h1-line)',
+                color: 'var(--color-text-primary)',
+                margin: 0,
+              }}
+            >
+              Skills
+            </h1>
+            {/* 项目切换器 */}
+            <ProjectSwitcher
+              currentProject={guiState?.currentProject ?? null}
+              recentProjects={guiState?.recentProjects ?? []}
+              hasProjectConfig={!!cliProjectDir}
+              onSelect={handleSelectProject}
+              onOpenDirectory={() => void handleOpenDirectory()}
+            />
+          </div>
           <p
             style={{
               marginTop: 'var(--space-1)',
@@ -178,8 +417,9 @@ export function Skills() {
               color: 'var(--color-text-tertiary)',
             }}
           >
-            共 {totalCount} 项 · 用户级 {userResources.length} · 项目级{' '}
-            {projectResources.length}
+            共 {allResources.length} 项 · 已订阅{' '}
+            {allResources.length - unusedResources.length} · 候选{' '}
+            {unusedResources.length}
           </p>
         </div>
         <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
@@ -201,27 +441,48 @@ export function Skills() {
         </div>
       </div>
 
-      {/* 用户级资源段 */}
-      {userResources.length > 0 && (
-        <section className="page-section">
-          <div className="page-section__header">
-            <h2 className="page-section__title">用户级 Skills</h2>
-            <span
-              className="tabular-nums"
-              style={{
-                fontSize: 'var(--text-caption-size)',
-                color: 'var(--color-text-tertiary)',
-              }}
-            >
-              {userResources.length} 项
-            </span>
-          </div>
+      {/* 三段 Tab */}
+      <div className="tabs" role="tablist">
+        <TabButton
+          label="用户级订阅"
+          count={tabCounts.user}
+          active={activeTab === 'user'}
+          onClick={() => setActiveTab('user')}
+        />
+        <TabButton
+          label="项目级订阅"
+          count={tabCounts.project}
+          active={activeTab === 'project'}
+          onClick={() => setActiveTab('project')}
+        />
+        <TabButton
+          label="未订阅"
+          count={tabCounts.unused}
+          active={activeTab === 'unused'}
+          onClick={() => setActiveTab('unused')}
+        />
+      </div>
+
+      {/* Tab 内容 */}
+      <div className="tabs__panel" role="tabpanel">
+        {currentResources.length === 0 ? (
+          <TabEmpty
+            tab={activeTab}
+            projectDir={selectedProject}
+            hasProjectConfig={
+              !!selectedProject &&
+              !!cliProjectDir &&
+              normalizePath(cliProjectDir) === normalizePath(selectedProject)
+            }
+          />
+        ) : (
           <div className="card-grid">
-            {userResources.map((item) => (
+            {currentResources.map((item) => (
               <SkillCard
-                key={`user-${item.dirName}`}
+                key={`${activeTab}-${item.dirName}`}
                 item={item}
-                scope="用户级"
+                tab={activeTab}
+                projectDir={selectedProject}
                 onSync={() =>
                   setSyncTask({
                     kind: 'one',
@@ -229,47 +490,62 @@ export function Skills() {
                     displayName: item.name,
                   })
                 }
-              />
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* 项目级资源段 */}
-      {projectResources.length > 0 && (
-        <section className="page-section">
-          <div className="page-section__header">
-            <h2 className="page-section__title">项目级 Skills</h2>
-            <span
-              className="tabular-nums"
-              style={{
-                fontSize: 'var(--text-caption-size)',
-                color: 'var(--color-text-tertiary)',
-              }}
-            >
-              {projectResources.length} 项
-            </span>
-          </div>
-          <div className="card-grid">
-            {projectResources.map((item) => (
-              <SkillCard
-                key={`project-${item.dirName}`}
-                item={item}
-                scope="项目级"
-                onSync={() =>
-                  setSyncTask({
-                    kind: 'one',
+                onSubscribe={() =>
+                  setPendingSub({
                     dirName: item.dirName,
                     displayName: item.name,
+                  })
+                }
+                onUnsubscribe={(scope) =>
+                  setPendingUnsub({
+                    dirName: item.dirName,
+                    displayName: item.name,
+                    scope,
                   })
                 }
               />
             ))}
           </div>
-        </section>
+        )}
+      </div>
+
+      {/* Toast 消息 */}
+      {toast && (
+        <div className="toast-container">
+          <div className={`toast toast--${toast.kind === 'success' ? 'success' : 'danger'}`}>
+            <div className="toast__body">
+              <p className="toast__title">{toast.text}</p>
+            </div>
+          </div>
+        </div>
       )}
 
-      {/* 同步 Modal —— 按任务上下文挂载 */}
+      {/* 订阅 Popover */}
+      {pendingSub && (
+        <SubscribePopover
+          resourceName={pendingSub.displayName}
+          hasProject={!!selectedProject}
+          onConfirm={(scope, sync) => void handleSubscribe(scope, sync)}
+          onCancel={() => setPendingSub(null)}
+        />
+      )}
+
+      {/* 取消订阅确认对话框 */}
+      {pendingUnsub && (
+        <UnsubscribeConfirm
+          resourceName={pendingUnsub.displayName}
+          scope={pendingUnsub.scope}
+          prune={unsubPrune}
+          onPruneChange={setUnsubPrune}
+          onConfirm={() => void handleUnsubscribe()}
+          onCancel={() => {
+            setPendingUnsub(null);
+            setUnsubPrune(false);
+          }}
+        />
+      )}
+
+      {/* 同步 Modal */}
       {syncTask && (
         <SyncProgressModal
           args={buildSyncArgs(syncTask)}
@@ -282,16 +558,186 @@ export function Skills() {
   );
 }
 
+/* ============================================================
+ * Tab 按钮子组件
+ * ============================================================ */
+
+interface TabButtonProps {
+  /** Tab 显示文案 */
+  label: string;
+  /** 右侧计数 */
+  count: number;
+  /** 是否激活 */
+  active: boolean;
+  /** 点击回调 */
+  onClick: () => void;
+}
+
 /**
- * 构造 CLI 参数
- * - 全部同步：`sync skills`
- * - 单个同步：`sync skills --skill <dirName>`（CLI 的 sync.ts 已支持该模式）
+ * Tab 按钮（复用设计系统 .tabs__tab）
+ */
+function TabButton({ label, count, active, onClick }: TabButtonProps) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      className={`tabs__tab${active ? ' tabs__tab--active' : ''}`}
+      onClick={onClick}
+    >
+      {label}
+      <span
+        className="tabular-nums"
+        style={{
+          marginLeft: 'var(--space-2)',
+          fontSize: 'var(--text-caption-size)',
+          color: active ? 'var(--color-brand-default)' : 'var(--color-text-tertiary)',
+        }}
+      >
+        {count}
+      </span>
+    </button>
+  );
+}
+
+/* ============================================================
+ * Tab 空态子组件
+ * ============================================================ */
+
+interface TabEmptyProps {
+  tab: TabName;
+  projectDir: string | null;
+  /** 选中的项目是否有 .aitools/project.yaml */
+  hasProjectConfig: boolean;
+}
+
+/**
+ * 各 Tab 的空态展示
+ */
+function TabEmpty({ tab, projectDir, hasProjectConfig }: TabEmptyProps) {
+  /* 项目级订阅的三态提示 */
+  const projectMsg = !projectDir
+    ? { title: '请先选择项目', desc: '在顶部项目切换器中选择一个项目目录，即可查看该项目的订阅。' }
+    : !hasProjectConfig
+      ? {
+          title: '当前项目未初始化',
+          desc: '切换到「未订阅」Tab 选择一个 Skill 订阅到「项目级」，将自动创建项目配置。或在终端执行 aitools subscribe skills <name> --scope project。',
+        }
+      : {
+          title: '当前项目没有订阅',
+          desc: '切换到「未订阅」Tab，选择「项目级」订阅到当前项目。',
+        };
+
+  const messages: Record<TabName, { title: string; desc: string }> = {
+    user: {
+      title: '没有用户级订阅',
+      desc: '切换到「未订阅」Tab，点击「订阅」将 Skill 添加到用户级。',
+    },
+    project: projectMsg,
+    unused: {
+      title: '所有 Skills 都已订阅',
+      desc: '源目录中的所有 Skill 都已被订阅到至少一个位置。',
+    },
+  };
+
+  const msg = messages[tab];
+
+  return (
+    <div className="empty-state">
+      <Package className="empty-state__icon" size={48} aria-hidden="true" />
+      <h3 className="empty-state__title">{msg.title}</h3>
+      <p className="empty-state__desc">{msg.desc}</p>
+    </div>
+  );
+}
+
+/* ============================================================
+ * 取消订阅确认对话框
+ * ============================================================ */
+
+interface UnsubscribeConfirmProps {
+  resourceName: string;
+  scope: SubscriptionScope;
+  prune: boolean;
+  onPruneChange: (v: boolean) => void;
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+
+/**
+ * 取消订阅确认弹窗
+ * RFC-002 §4.3：直接确认对话框 + --prune 勾选
+ */
+function UnsubscribeConfirm({
+  resourceName,
+  scope,
+  prune,
+  onPruneChange,
+  onConfirm,
+  onCancel,
+}: UnsubscribeConfirmProps) {
+  const scopeLabel = scope === 'user' ? '用户级' : '项目级';
+
+  return (
+    <div
+      className="modal-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="unsub-confirm-title"
+    >
+      <div className="modal modal--xs">
+        <header className="modal__header">
+          <h2 className="modal__title" id="unsub-confirm-title">
+            取消订阅
+          </h2>
+        </header>
+        <div className="modal__body">
+          <p style={{ margin: '0 0 var(--space-4)', color: 'var(--color-text-primary)' }}>
+            取消订阅「{resourceName}」（{scopeLabel}）？
+          </p>
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--space-2)',
+              cursor: 'pointer',
+              fontSize: 'var(--text-body-sm-size)',
+              color: 'var(--color-text-secondary)',
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={prune}
+              onChange={(e) => onPruneChange(e.target.checked)}
+            />
+            同时从工具目录中删除已同步的文件（--prune）
+          </label>
+        </div>
+        <footer className="modal__footer">
+          <button type="button" className="btn btn--ghost" onClick={onCancel}>
+            取消
+          </button>
+          <button type="button" className="btn btn--danger" onClick={onConfirm}>
+            确认取消订阅
+          </button>
+        </footer>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+ * CLI 参数构造
+ * ============================================================ */
+
+/**
+ * 构造 sync CLI 参数
  */
 function buildSyncArgs(task: SyncTask): string[] {
   if (task.kind === 'all') {
     return ['sync', 'skills'];
   }
-  return ['sync', 'skills', '--skill', task.dirName];
+  return ['sync', 'skills', task.dirName];
 }
 
 /**
@@ -305,31 +751,66 @@ function buildSyncTitle(task: SyncTask): string {
 }
 
 /* ============================================================
- * 单个 Skill 卡片
+ * SkillCard 子组件
  * ============================================================ */
 
 interface SkillCardProps {
   /** 资源条目 */
-  item: ResourceListItem;
-  /** 层级显示文案（用户级 / 项目级） */
-  scope: string;
-  /** 点击「同步」触发；仅该卡有未同步目标时才会渲染按钮 */
+  item: ResourceView;
+  /** 当前所在 Tab（决定显示哪些按钮） */
+  tab: TabName;
+  /** 当前项目路径 */
+  projectDir: string | null;
+  /** 同步回调 */
   onSync: () => void;
+  /** 订阅回调（Unused Tab 可见） */
+  onSubscribe: () => void;
+  /** 取消订阅回调（User/Project Tab 可见） */
+  onUnsubscribe: (scope: SubscriptionScope) => void;
 }
 
 /**
- * 单个 Skill 卡片组件
- * 复用设计系统的 .card 结构；不自定义样式
+ * Skill 卡片组件（Tab 感知）
+ *
+ * - Unused Tab：显示「订阅」按钮
+ * - User/Project Tab：显示同步状态 badge + 「取消订阅」+「同步」按钮
  */
-function SkillCard({ item, scope, onSync }: SkillCardProps) {
-  /* 描述文案：CLI 用 '-' 表示无描述，这里改为友好文案 */
+function SkillCard({
+  item,
+  tab,
+  projectDir,
+  onSync,
+  onSubscribe,
+  onUnsubscribe,
+}: SkillCardProps) {
   const desc =
     item.description && item.description !== '-'
       ? item.description
       : '（该 Skill 未填写描述）';
 
-  /* 只要有任意 target 不是 synced，就允许"单卡同步" */
-  const hasUnsynced = item.targets.some((t) => t.status !== 'synced');
+  /* 根据 Tab 获取当前视角的订阅 */
+  const currentSub =
+    tab === 'user'
+      ? item.subscriptions.find((s) => s.scope === 'user')
+      : tab === 'project'
+        ? item.subscriptions.find(
+            (s) =>
+              s.scope === 'project' &&
+              normalizePath(s.projectDir ?? '') === normalizePath(projectDir ?? ''),
+          )
+        : undefined;
+
+  /* 当前视角的 target 状态（Unused Tab 无） */
+  const targetStatuses = currentSub?.targets ?? [];
+  const hasUnsynced = targetStatuses.some((t) => t.status !== 'synced');
+
+  /* Unused Tab 下的 scope 推导 */
+  const scopeLabel =
+    tab === 'user'
+      ? '用户级'
+      : tab === 'project'
+        ? '项目级'
+        : '候选';
 
   return (
     <article className="card">
@@ -338,7 +819,7 @@ function SkillCard({ item, scope, onSync }: SkillCardProps) {
       </header>
       <div className="card__meta">
         <span className="tag">Skill</span>
-        <span className="tag tag--neutral">{scope}</span>
+        <span className="tag tag--neutral">{scopeLabel}</span>
         <span
           className="font-mono"
           style={{
@@ -352,30 +833,71 @@ function SkillCard({ item, scope, onSync }: SkillCardProps) {
       </div>
       <p className="card__desc">{desc}</p>
       <div className="card__footer">
-        {item.targets.map((t) => (
+        {/* 同步状态 badge（User / Project Tab） */}
+        {targetStatuses.map((t) => (
           <span
-            key={t.name}
+            key={t.target}
             className={`badge ${STATUS_BADGE_CLASS[t.status]}`}
             title={t.targetPath}
           >
             <span className="badge__dot" />
-            {STATUS_LABEL[t.status]} · {t.name}
+            {STATUS_LABEL[t.status]} · {t.target}
           </span>
         ))}
-        {/* 卡内「同步」按钮：只在有未同步项时出现（状态先于功能：没有待办就不显示动作） */}
-        {hasUnsynced && (
-          <button
-            type="button"
-            className="btn btn--secondary btn--sm"
-            style={{ marginLeft: 'auto' }}
-            onClick={onSync}
-            aria-label={`同步 ${item.name}`}
-          >
-            <ArrowRightCircle size={14} aria-hidden="true" />
-            同步
-          </button>
-        )}
+
+        {/* 操作按钮区：靠右对齐 */}
+        <span style={{ marginLeft: 'auto', display: 'flex', gap: 'var(--space-2)' }}>
+          {/* Unused Tab：订阅按钮 */}
+          {tab === 'unused' && (
+            <button
+              type="button"
+              className="btn btn--primary btn--sm"
+              onClick={onSubscribe}
+              aria-label={`订阅 ${item.name}`}
+            >
+              <Plus size={14} aria-hidden="true" />
+              订阅
+            </button>
+          )}
+
+          {/* User / Project Tab：取消订阅 + 同步 */}
+          {tab !== 'unused' && currentSub && (
+            <>
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm"
+                onClick={() => onUnsubscribe(currentSub.scope)}
+                aria-label={`取消订阅 ${item.name}`}
+              >
+                <Trash2 size={14} aria-hidden="true" />
+                取消订阅
+              </button>
+              {hasUnsynced && (
+                <button
+                  type="button"
+                  className="btn btn--secondary btn--sm"
+                  onClick={onSync}
+                  aria-label={`同步 ${item.name}`}
+                >
+                  <ArrowRightCircle size={14} aria-hidden="true" />
+                  同步
+                </button>
+              )}
+            </>
+          )}
+        </span>
       </div>
     </article>
   );
+}
+
+/* ============================================================
+ * 工具函数
+ * ============================================================ */
+
+/**
+ * 路径规范化：去尾部斜杠，保证匹配一致性
+ */
+function normalizePath(p: string): string {
+  return p.replace(/\/+$/, '');
 }

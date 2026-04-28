@@ -1,12 +1,11 @@
 /**
- * Sidebar 侧栏组件
+ * Sidebar 侧栏组件 · RFC-002 阶段 3
  *
  * 严格遵循设计系统 L5 组件规范：
- * - 使用 components.css 中定义的 .sidebar / .nav-item 等类，不自写 CSS
+ * - 使用 components.css 中定义的 .sidebar / .nav-item 等类
  * - 三组结构：状态总览 / 资源对象 / 外部关系 + 底部设置
- * - 未实现项显示 '—'（贯彻 L2 原则 3 诚实）
- *
- * 本文件翻译自 docs/design-system/06-gui-prototype/pages/dashboard.html 的侧栏部分
+ * - Skills / Tools 项显示动态计数徽章（RFC-002 §3.1）
+ * - 未实现项显示 '—'（L2 原则「诚实」）
  */
 import {
   Home,
@@ -22,39 +21,30 @@ import {
 import type { RouteName } from '../lib/routes';
 
 /**
+ * Sidebar 计数数据（由 App 传入）
+ */
+export interface SidebarCounts {
+  /** Skills 订阅总数（User + Project） */
+  skills: number | null;
+  /** 已连接工具 — "已启用/总数"格式 */
+  tools: string | null;
+}
+
+/**
  * 导航项配置
  */
 interface NavItemConfig {
   /** 路由名 */
   route: RouteName | null;
-  /** 图标组件（Lucide 图标） */
+  /** 图标组件 */
   icon: LucideIcon;
   /** 显示标签 */
   label: string;
-  /** 右侧徽章（数字或 '—'） */
+  /** 右侧徽章文案 */
   badge?: string;
-  /** 是否未实现（L2 原则 3：诚实地显示占位） */
+  /** 是否未实现 */
   disabled?: boolean;
 }
-
-/** 第一组：状态总览 */
-const GROUP_STATUS: NavItemConfig[] = [
-  { route: 'dashboard', icon: Home, label: '工作台' },
-];
-
-/** 第二组：资源对象（对象导向） */
-const GROUP_RESOURCES: NavItemConfig[] = [
-  { route: 'skills', icon: Package, label: 'Skills', badge: '—' },
-  { route: null, icon: Zap, label: 'Commands', badge: '—', disabled: true },
-  { route: null, icon: Bot, label: 'Agents', badge: '—', disabled: true },
-  { route: null, icon: FileText, label: 'Rules', badge: '—', disabled: true },
-];
-
-/** 第三组：外部关系 */
-const GROUP_EXTERNAL: NavItemConfig[] = [
-  { route: 'tools', icon: Link2, label: '已连接工具', badge: '—' },
-  { route: null, icon: FolderOpen, label: '项目', badge: '—', disabled: true },
-];
 
 /**
  * Sidebar 组件 Props
@@ -64,23 +54,46 @@ export interface SidebarProps {
   active: RouteName;
   /** 路由切换回调 */
   onNavigate: (route: RouteName) => void;
+  /** 动态计数（可选；未传入时显示 '—'） */
+  counts?: SidebarCounts;
 }
 
 /**
  * 侧栏主组件
- *
- * @param active 当前激活路由
- * @param onNavigate 路由切换回调
  */
-export function Sidebar({ active, onNavigate }: SidebarProps) {
+export function Sidebar({ active, onNavigate, counts }: SidebarProps) {
+  /* 构建动态导航项配置 */
+  const groupStatus: NavItemConfig[] = [
+    { route: 'dashboard', icon: Home, label: '工作台' },
+  ];
+
+  const groupResources: NavItemConfig[] = [
+    {
+      route: 'skills',
+      icon: Package,
+      label: 'Skills',
+      badge: counts?.skills !== null && counts?.skills !== undefined
+        ? String(counts.skills)
+        : '—',
+    },
+    { route: null, icon: Zap, label: 'Commands', badge: '—', disabled: true },
+    { route: null, icon: Bot, label: 'Agents', badge: '—', disabled: true },
+    { route: null, icon: FileText, label: 'Rules', badge: '—', disabled: true },
+  ];
+
+  const groupExternal: NavItemConfig[] = [
+    {
+      route: 'tools',
+      icon: Link2,
+      label: '已连接工具',
+      badge: counts?.tools ?? '—',
+    },
+    { route: null, icon: FolderOpen, label: '项目', badge: '—', disabled: true },
+  ];
+
   return (
     <nav className="sidebar" aria-label="主导航">
-      {/*
-       * 品牌区
-       * data-tauri-drag-region：macOS titleBarStyle=Overlay 下作为窗口拖拽把手，
-       * 用户从 logo/文字/空白任意位置按下均可拖动窗口。
-       * Tauri 2 原生识别此属性，子元素除非另行标注 no-drag，否则也继承可拖拽。
-       */}
+      {/* 品牌区 */}
       <div className="sidebar__brand" data-tauri-drag-region>
         <span className="sidebar__logo" aria-hidden="true">
           A
@@ -90,17 +103,17 @@ export function Sidebar({ active, onNavigate }: SidebarProps) {
 
       {/* 第一组：状态总览 */}
       <ul className="sidebar__group">
-        {GROUP_STATUS.map((item) => renderNavItem(item, active, onNavigate))}
+        {groupStatus.map((item) => renderNavItem(item, active, onNavigate))}
       </ul>
 
       {/* 第二组：资源对象 */}
       <ul className="sidebar__group">
-        {GROUP_RESOURCES.map((item) => renderNavItem(item, active, onNavigate))}
+        {groupResources.map((item) => renderNavItem(item, active, onNavigate))}
       </ul>
 
       {/* 第三组：外部关系 */}
       <ul className="sidebar__group">
-        {GROUP_EXTERNAL.map((item) => renderNavItem(item, active, onNavigate))}
+        {groupExternal.map((item) => renderNavItem(item, active, onNavigate))}
       </ul>
 
       {/* 弹性空间 */}
@@ -129,22 +142,13 @@ function renderNavItem(
   const isActive = item.route !== null && item.route === active;
   const Icon = item.icon;
 
-  /* 构造类名 */
   const classes = ['nav-item'];
   if (isActive) classes.push('nav-item--active');
   if (item.disabled) classes.push('nav-item--disabled');
 
-  /**
-   * 点击处理：
-   * - 未实现项仍可点击（会跳向空态提示），但首版 MVP 不做跳转
-   * - 实现项跳转到目标路由
-   */
   const handleClick = (e: React.MouseEvent) => {
     e.preventDefault();
-    if (item.disabled || item.route === null) {
-      /* 未实现：暂不处理，未来跳向"该资源类型暂未支持"空态 */
-      return;
-    }
+    if (item.disabled || item.route === null) return;
     onNavigate(item.route);
   };
 

@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-04-28
+
+> **非破坏** · CLI 补 target enable/disable 命令（RFC-001 的 patch）
+
+### 新增命令 — `aitools target`
+
+填补 RFC-001 留下的空缺：在 v0.4.2 之前，`targets[].enabled` 字段只能手改
+`~/.aitools/config.yaml`。本次新增命令族允许通过 CLI（以及 GUI 通过 `invoke_cli`）
+管理 target 启用状态。
+
+- **`aitools target enable <name>`** — 启用指定 target，使其参与后续 sync
+- **`aitools target disable <name>`** — 禁用指定 target，使其退出 sync；**不**清理已同步目录
+
+两命令均为**幂等**：对已是目标态的 target 重复调用不报错、不重写配置。
+
+### 新增 JSON 事件
+
+在现有 `JsonEvent` 联合类型上**增量**加入两个事件（不破坏旧消费者）：
+
+- `target.enabled` — `target enable` 成功时发射
+- `target.disabled` — `target disable` 成功时发射
+
+两者的 `data` 均为 `{ name: string; changed: boolean }`。`changed` 字段区分
+"真正翻转并落盘"（`true`）与"幂等跳过"（`false`）。
+
+未知 target 错误路径复用 `error` 事件，新增错误码 `code: "TARGET_NOT_FOUND"`。
+
+### 兼容性
+
+- 不改现有命令、不改配置文件 schema，配置无需迁移
+- 回滚成本极低：删除 `src/commands/target.ts` 与 `src/index.ts` 内的命令族注册即可
+
+### 相关文档
+
+- RFC：[`docs/rfcs/v0.4.2-target-enable-disable.md`](docs/rfcs/v0.4.2-target-enable-disable.md)
+- 被依赖：RFC-002 GUI 订阅视图 · 阶段 3 Tools 页启用开关
+
+---
+
 ## [0.4.0] - 2026-04-28
 
 > **破坏性变更** · 订阅模型重构

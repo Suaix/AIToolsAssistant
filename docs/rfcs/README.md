@@ -40,7 +40,8 @@
 | 编号 | 版本 | 标题 | 状态 |
 |---|---|---|---|
 | 001 | v0.4.0 | [订阅模型（Subscription Model）](./v0.4.0-subscription-model.md) | 🟢 Accepted |
-| 002 | 待定 | GUI 订阅视图重设计（占位） | ⚪ 未起草 |
+| 001.1 | v0.4.2 | [CLI target enable/disable 命令补丁](./v0.4.2-target-enable-disable.md) | ✅ Shipped |
+| 002 | v0.4.1 | [GUI 订阅视图重设计](./v0.4.1-gui-subscription-view.md) | ✅ Shipped |
 
 ---
 

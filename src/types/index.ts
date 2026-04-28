@@ -438,6 +438,20 @@ export interface ErrorEventData {
 }
 
 /**
+ * target.enabled / target.disabled 事件载荷（v0.4.2 新增 / RFC-001.1）
+ *
+ * 用于向 GUI 通报一次 target 启用/禁用操作的结果；
+ * `changed` 字段用于区分"真正发生了翻转"与"幂等跳过"，
+ * GUI 可据此决定是否播放刷新动画。
+ */
+export interface TargetEnabledData {
+  /** 被操作的 target 名称（对应 Target.name） */
+  name: string;
+  /** 是否发生了实际状态翻转（false = 幂等跳过，状态本来就是目标态） */
+  changed: boolean;
+}
+
+/**
  * 所有 JSON 事件的联合类型
  * 每个事件会作为单行 JSON 写入 stdout
  */
@@ -447,7 +461,10 @@ export type JsonEvent =
   | { event: 'progress'; data: SyncProgressData }
   | { event: 'summary'; data: SyncSummaryData }
   | { event: 'done'; data: SyncDoneData }
-  | { event: 'error'; data: ErrorEventData };
+  | { event: 'error'; data: ErrorEventData }
+  /* v0.4.2 / RFC-001.1 新增：target 启用状态管理 */
+  | { event: 'target.enabled'; data: TargetEnabledData }
+  | { event: 'target.disabled'; data: TargetEnabledData };
 
 /**
  * 同步进度回调

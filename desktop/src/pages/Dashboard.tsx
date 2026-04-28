@@ -1,37 +1,49 @@
 /**
- * Dashboard 工作台页面 · 阶段 3 对接 CLI 只读
+ * Dashboard 工作台页面 · RFC-002 阶段 3 完整 5 态
  *
- * 遵循 L2 原则 2「状态先于功能」：
- * HeroCard 根据真实环境呈现 4 态之一：
+ * L2 原则「状态先于功能」：
+ * HeroCard 5 态对齐 RFC-002 §3.4：
  *   - loading：正在调用 CLI
- *   - cli_missing：未检测到 aitools CLI（指引安装）
- *   - all_synced：所有资源已同步（success 型）
- *   - has_unsynced：存在未同步/需更新（warning 型）
+ *   - cli_missing：未检测到 aitools CLI
+ *   - error：上一次操作有错误
+ *   - empty / no_subscription：无订阅
+ *   - synced：全部就绪
+ *   - drift：存在未同步 / 需更新
  */
 import { useEffect, useState } from 'react';
-import { CheckCircle2, AlertTriangle, Loader2, Terminal, RefreshCw } from 'lucide-react';
+import {
+  CheckCircle2,
+  AlertTriangle,
+  Loader2,
+  Terminal,
+  RefreshCw,
+  Package,
+} from 'lucide-react';
 import {
   checkCliAvailable,
   listResources,
-  type ResourceListItem,
+  type ResourceView,
   CliError,
 } from '../lib/cli';
 import { SyncProgressModal } from '../components/SyncProgressModal';
 
-/** Dashboard 状态机的 5 种状态 */
+/**
+ * Dashboard 5 态状态机（对齐 RFC-002 §3.4 HeroCard 5 态）
+ */
 type DashboardState =
   | { kind: 'loading' }
   | { kind: 'cli_missing' }
   | { kind: 'error'; message: string }
-  | { kind: 'all_synced'; total: number }
-  | { kind: 'has_unsynced'; total: number; unsyncedCount: number };
+  | { kind: 'empty' }
+  | { kind: 'no_subscription'; candidateCount: number }
+  | { kind: 'synced'; subscribeCount: number; candidateCount: number }
+  | { kind: 'drift'; subscribeCount: number; candidateCount: number; driftCount: number };
 
 /**
  * 工作台主页面
  */
 export function Dashboard() {
   const [state, setState] = useState<DashboardState>({ kind: 'loading' });
-  /** 是否显示同步 Modal */
   const [syncOpen, setSyncOpen] = useState(false);
 
   useEffect(() => {
@@ -39,15 +51,12 @@ export function Dashboard() {
   }, []);
 
   /**
-   * 加载 Dashboard 数据：
-   * 1. 先检查 CLI 可用性
-   * 2. 若可用，调用 list skills 拿资源汇总
-   * 3. 统计同步状态
+   * 加载 Dashboard 数据
    */
   async function loadDashboard() {
     setState({ kind: 'loading' });
 
-    /* 步骤 1：CLI 健康检查 */
+    /* CLI 健康检查 */
     try {
       const available = await checkCliAvailable();
       if (!available) {
@@ -62,25 +71,33 @@ export function Dashboard() {
       return;
     }
 
-    /* 步骤 2：拉取 skills 数据 */
+    /* 拉取 skills 数据 */
     try {
       const result = await listResources('skills');
-      const allResources = [...result.userResources, ...result.projectResources];
-      const unsyncedCount = countUnsynced(allResources);
+      const allResources = result.resources;
+      const subscribedResources = allResources.filter(
+        (r) => r.subscriptions.length > 0,
+      );
+      const candidateCount = allResources.length - subscribedResources.length;
+      const driftCount = countUnsynced(subscribedResources);
 
+      /* 5 态判定（RFC-002 §3.4） */
       if (allResources.length === 0) {
-        /* 空源目录：按"都同步了（0 项）"处理，文案仍写 0 项，不制造焦虑 */
-        setState({ kind: 'all_synced', total: 0 });
-        return;
-      }
-
-      if (unsyncedCount === 0) {
-        setState({ kind: 'all_synced', total: allResources.length });
+        setState({ kind: 'empty' });
+      } else if (subscribedResources.length === 0) {
+        setState({ kind: 'no_subscription', candidateCount });
+      } else if (driftCount === 0) {
+        setState({
+          kind: 'synced',
+          subscribeCount: subscribedResources.length,
+          candidateCount,
+        });
       } else {
         setState({
-          kind: 'has_unsynced',
-          total: allResources.length,
-          unsyncedCount,
+          kind: 'drift',
+          subscribeCount: subscribedResources.length,
+          candidateCount,
+          driftCount,
         });
       }
     } catch (err) {
@@ -102,40 +119,7 @@ export function Dashboard() {
         onSync={() => setSyncOpen(true)}
       />
 
-      {/* 开发进度区（保留，作为 MVP 阶段的透明沟通） */}
-      <section className="page-section">
-        <div className="page-section__header">
-          <h2 className="page-section__title">开发进度</h2>
-        </div>
-        <div className="card-stack">
-          <article className="card">
-            <h3 className="card__title">✅ 阶段 1 · CLI 改造</h3>
-            <p className="card__desc">
-              已完成：新增 --json 输出模式，支持 NDJSON 流式事件，为 GUI 提供稳定数据契约。
-            </p>
-          </article>
-          <article className="card">
-            <h3 className="card__title">✅ 阶段 2 · 桌面骨架</h3>
-            <p className="card__desc">
-              已完成：Tauri + React + TypeScript 工程；Sidebar；主题切换；macOS 标题栏适配。
-            </p>
-          </article>
-          <article className="card">
-            <h3 className="card__title">✅ 阶段 3 · 对接 CLI 只读</h3>
-            <p className="card__desc">
-              已完成：Rust invoke_cli command；NDJSON 解析层；Skills 页 4 态化；Dashboard 实时健康度。
-            </p>
-          </article>
-          <article className="card">
-            <h3 className="card__title">🔨 阶段 4 · 双向同步（当前）</h3>
-            <p className="card__desc">
-              已完成：Rust invoke_cli_stream 流式命令；SyncProgressModal 进度弹窗；Dashboard / Skills 同步入口。
-            </p>
-          </article>
-        </div>
-      </section>
-
-      {/* 同步进度弹窗 —— 仅在用户点击「立即同步」后挂载 */}
+      {/* 同步进度弹窗 */}
       {syncOpen && (
         <SyncProgressModal
           args={['sync', 'skills']}
@@ -149,20 +133,20 @@ export function Dashboard() {
 }
 
 /* ============================================================
- * HeroCard 子组件 —— 按状态渲染 4 种变体
+ * HeroCard 子组件 —— 完整 5 态
  * ============================================================ */
 
 interface HeroCardProps {
   state: DashboardState;
   onRetry: () => void;
-  /** has_unsynced 态下点击「立即同步」触发 */
   onSync: () => void;
 }
 
 /**
- * 首屏状态卡片：5 态驱动的视觉焦点
+ * 首屏状态卡片：5 态驱动（RFC-002 §3.4）
  */
 function HeroCard({ state, onRetry, onSync }: HeroCardProps) {
+  /* ---- loading ---- */
   if (state.kind === 'loading') {
     return (
       <section className="hero-card" aria-live="polite" aria-busy="true">
@@ -182,6 +166,7 @@ function HeroCard({ state, onRetry, onSync }: HeroCardProps) {
     );
   }
 
+  /* ---- cli_missing ---- */
   if (state.kind === 'cli_missing') {
     return (
       <section className="hero-card hero-card--warning" aria-live="assertive">
@@ -203,7 +188,7 @@ function HeroCard({ state, onRetry, onSync }: HeroCardProps) {
             >
               npm i -g aitools-cli
             </code>{' '}
-            安装，装好后点击右侧刷新
+            安装
           </p>
         </div>
         <div className="hero-card__action">
@@ -215,9 +200,10 @@ function HeroCard({ state, onRetry, onSync }: HeroCardProps) {
     );
   }
 
+  /* ---- error ---- */
   if (state.kind === 'error') {
     return (
-      <section className="hero-card hero-card--warning" aria-live="assertive">
+      <section className="hero-card hero-card--danger" aria-live="assertive">
         <div className="hero-card__bar" />
         <div className="hero-card__content">
           <div className="hero-card__main">
@@ -228,62 +214,107 @@ function HeroCard({ state, onRetry, onSync }: HeroCardProps) {
         </div>
         <div className="hero-card__action">
           <button type="button" className="btn btn--ghost" onClick={onRetry}>
-            重试
+            查看错误
           </button>
         </div>
       </section>
     );
   }
 
-  if (state.kind === 'all_synced') {
+  /* ---- empty：源目录无资源 ---- */
+  if (state.kind === 'empty') {
+    return (
+      <section className="hero-card" aria-live="polite">
+        <div className="hero-card__bar" />
+        <div className="hero-card__content">
+          <div className="hero-card__main">
+            <Package className="hero-card__icon" />
+            <h2 className="hero-card__title">你写一次，它到处都在</h2>
+          </div>
+          <p className="hero-card__sub">
+            在 ~/.aitools/skills/ 下放置 Skill 文件夹，开始你的第一次同步
+          </p>
+        </div>
+        <div className="hero-card__action">
+          <button type="button" className="btn btn--primary" onClick={onRetry}>
+            开始订阅
+          </button>
+        </div>
+      </section>
+    );
+  }
+
+  /* ---- no_subscription：有资源但没订阅 ---- */
+  if (state.kind === 'no_subscription') {
+    return (
+      <section className="hero-card" aria-live="polite">
+        <div className="hero-card__bar" />
+        <div className="hero-card__content">
+          <div className="hero-card__main">
+            <Package className="hero-card__icon" />
+            <h2 className="hero-card__title">你写一次，它到处都在</h2>
+          </div>
+          <p className="hero-card__sub">
+            发现 {state.candidateCount} 个候选 Skill · 去 Skills 页订阅你的第一个
+          </p>
+        </div>
+        <div className="hero-card__action">
+          <button type="button" className="btn btn--primary" onClick={onRetry}>
+            订阅第一个 skill
+          </button>
+        </div>
+      </section>
+    );
+  }
+
+  /* ---- synced：全部就绪 ---- */
+  if (state.kind === 'synced') {
     return (
       <section className="hero-card hero-card--success" aria-live="polite">
         <div className="hero-card__bar" />
         <div className="hero-card__content">
           <div className="hero-card__main">
             <CheckCircle2 className="hero-card__icon" />
-            <h2 className="hero-card__title">
-              {state.total === 0
-                ? '暂无 Skills · 等待你添加'
-                : `全部就绪 · ${state.total} 个 Skills 已同步`}
-            </h2>
+            <h2 className="hero-card__title">你写一次，它到处都在</h2>
           </div>
           <p className="hero-card__sub">
-            {state.total === 0
-              ? '在 ~/.aitools/skills/ 下放置 Skill 文件夹，刷新后即可看到'
-              : '所有 AI 工具的配置文件与源目录保持一致'}
+            {state.subscribeCount} 个订阅 · {state.candidateCount} 个候选 · 0 个需同步
           </p>
         </div>
         <div className="hero-card__action">
           <button type="button" className="btn btn--ghost" onClick={onRetry}>
-            刷新
+            查看详情
           </button>
         </div>
       </section>
     );
   }
 
-  /* has_unsynced */
+  /* ---- drift：存在需同步 ---- */
   return (
     <section className="hero-card hero-card--warning" aria-live="polite">
       <div className="hero-card__bar" />
       <div className="hero-card__content">
         <div className="hero-card__main">
           <AlertTriangle className="hero-card__icon" />
-          <h2 className="hero-card__title">
-            {state.unsyncedCount} 处待同步 · 共 {state.total} 个 Skills
-          </h2>
+          <h2 className="hero-card__title">你写一次，它到处都在</h2>
         </div>
         <p className="hero-card__sub">
-          源目录中部分变更尚未同步到 AI 工具的配置中
+          {state.subscribeCount} 个订阅 · {state.candidateCount} 个候选 ·{' '}
+          {state.driftCount} 个需同步
         </p>
       </div>
       <div className="hero-card__action">
-        <button type="button" className="btn btn--ghost btn--icon" onClick={onRetry} aria-label="刷新">
+        <button
+          type="button"
+          className="btn btn--ghost btn--icon"
+          onClick={onRetry}
+          aria-label="刷新"
+        >
           <RefreshCw size={18} aria-hidden="true" />
         </button>
         <button type="button" className="btn btn--primary" onClick={onSync}>
-          立即同步
+          一键同步全部
         </button>
       </div>
     </section>
@@ -295,14 +326,14 @@ function HeroCard({ state, onRetry, onSync }: HeroCardProps) {
  * ============================================================ */
 
 /**
- * 统计资源列表中"未同步或需更新"的项数
- *
- * 定义：只要有任意一个 target 状态不是 synced，就计为 1 项未同步
+ * 统计已订阅资源中"未同步或需更新"的项数
  */
-function countUnsynced(resources: ResourceListItem[]): number {
+function countUnsynced(resources: ResourceView[]): number {
   let count = 0;
   for (const r of resources) {
-    const hasNonSynced = r.targets.some((t) => t.status !== 'synced');
+    const hasNonSynced = r.subscriptions.some((sub) =>
+      sub.targets.some((t) => t.status !== 'synced'),
+    );
     if (hasNonSynced) count++;
   }
   return count;

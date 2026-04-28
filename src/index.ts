@@ -12,6 +12,10 @@ import { syncCommand } from './commands/sync.js';
 import { listCommand } from './commands/list.js';
 import { subscribeCommand } from './commands/subscribe.js';
 import { unsubscribeCommand } from './commands/unsubscribe.js';
+import {
+  targetEnableCommand,
+  targetDisableCommand,
+} from './commands/target.js';
 import { setReporterMode } from './utils/reporter.js';
 
 /** 实例化命令行程序对象 */
@@ -21,7 +25,7 @@ const program = new Command();
 program
   .name('aitools')
   .description('AI Agent 统一配置与资源同步管理工具（skills/commands/agents/rules）')
-  .version('0.4.0-alpha');
+  .version('0.4.2');
 
 /**
  * 全局 --json flag
@@ -117,6 +121,32 @@ program
   .option('--scope <scope>', '订阅落点: user（默认） | project', 'user')
   .option('--prune', '同时清理该落点下各 target 已同步的资源目录')
   .action(unsubscribeCommand);
+
+/**
+ * 注册 target 命令族（v0.4.2 新增 / RFC-001.1）
+ *
+ * 语义：管理同步目标工具（target）的启用状态
+ * 说明：
+ *   - 引入子命令层级（`target <subcommand>`），为将来的
+ *     `target add/remove/list` 等管理操作预留统一前缀
+ *   - 两个子命令都是幂等的；支持全局 --json 输出
+ *     `target.enabled` / `target.disabled` 事件
+ */
+const targetCmd = program
+  .command('target')
+  .description('管理同步目标工具（target）的启用状态');
+
+targetCmd
+  .command('enable')
+  .description('启用指定 target（使其参与 sync）')
+  .argument('<name>', 'target 名称（如 codebuddy、claude-code）')
+  .action(targetEnableCommand);
+
+targetCmd
+  .command('disable')
+  .description('禁用指定 target（使其退出 sync；不删除已同步的目录）')
+  .argument('<name>', 'target 名称（如 codebuddy、claude-code）')
+  .action(targetDisableCommand);
 
 /** 执行命令行参数解析 */
 program.parse();

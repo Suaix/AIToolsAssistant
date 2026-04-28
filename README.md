@@ -224,7 +224,37 @@ aitools unsubscribe skills frontend-design --scope project --prune
 | `--scope <scope>` | 落点：`user`（默认）/ `project` |
 | `--prune` | 清理目标侧已同步的目录（不做二次确认） |
 
-### 5. 同步 — `aitools sync`
+### 5. 管理目标工具 — `aitools target`（v0.4.2 新增）
+
+启用或禁用某个同步目标（target）。禁用后的 target 不再参与 `sync`，
+但**不会**清理已同步的目录；重新启用后由下一次 `sync` 按 hash 自动对齐。
+
+```bash
+# 启用一个 target（使其参与 sync）
+aitools target enable codebuddy
+
+# 禁用一个 target（退出 sync；已同步目录保留）
+aitools target disable claude-code
+
+# GUI / 脚本消费（NDJSON）
+aitools --json target enable codebuddy
+# → {"event":"target.enabled","data":{"name":"codebuddy","changed":true}}
+# → {"event":"done","data":{"exitCode":0}}
+```
+
+参数：
+
+| 参数 | 说明 |
+|---|---|
+| `<name>` | target 名称（对应 `config.yaml` 中 `targets[].name`，如 `codebuddy`、`claude-code`） |
+
+语义要点：
+
+- **幂等**：对已是目标态的 target 重复调用不报错、不重写配置，JSON 事件 `changed` 字段为 `false`
+- **不清扫**：`disable` 不会删除 `<user_base>/<type>/` 下的已同步文件。若需清理，请逐资源 `unsubscribe --prune`
+- **未知 target**：报错退出（exitCode=1），JSON 模式下 `error.code = "TARGET_NOT_FOUND"`
+
+### 6. 同步 — `aitools sync`
 
 按订阅清单遍历、对每条订阅做 hash 对比，决定新建 / 更新 / 跳过。
 
@@ -258,7 +288,7 @@ aitools sync skills --target codebuddy
 | `-t, --target <name>` | 仅同步到指定 AI 工具 |
 | `--scope <scope>` | `user`（仅用户级）/ `project`（仅当前项目） |
 
-### 6. 查看列表 — `aitools list`
+### 7. 查看列表 — `aitools list`
 
 ```bash
 aitools list              # 所有已实现类型
@@ -302,7 +332,7 @@ aitools list --type skills
 | ⚠️ 需更新 | 源与目标内容不同 |
 | ❌ 未同步 | 目标中不存在该资源 |
 
-### 7. JSON 模式（GUI / CI 集成）
+### 8. JSON 模式（GUI / CI 集成）
 
 所有命令支持 `--json` 全局选项，以 **NDJSON** 流式输出：
 
