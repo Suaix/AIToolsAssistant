@@ -12,12 +12,13 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Sidebar, type SidebarCounts } from './components/Sidebar';
 import { ThemeToggle } from './components/ThemeToggle';
+import { ProjectSwitcher } from './components/ProjectSwitcher';
 import { OnboardingWizard } from './components/OnboardingWizard';
 import { Dashboard } from './pages/Dashboard';
 import { Skills } from './pages/Skills';
 import { Tools } from './pages/Tools';
 import { Settings } from './pages/Settings';
-import { ROUTE_TITLES, type RouteName } from './lib/routes';
+import { type RouteName } from './lib/routes';
 import {
   listResources,
   subscribeResource,
@@ -26,6 +27,7 @@ import {
 import {
   loadGuiState,
   saveGuiState,
+  setCurrentProject,
   markOnboardingDone,
   type GuiState,
 } from './lib/gui-state';
@@ -33,14 +35,18 @@ import {
 /**
  * 根据路由名返回对应的页面组件
  */
-function renderPage(route: RouteName): React.ReactElement {
+function renderPage(
+  route: RouteName,
+  recentProjectCount: number,
+  currentProject: string | null,
+): React.ReactElement {
   switch (route) {
     case 'dashboard':
       return <Dashboard />;
     case 'skills':
-      return <Skills />;
+      return <Skills recentProjectCount={recentProjectCount} currentProject={currentProject} />;
     case 'skill-detail':
-      return <Skills />;
+      return <Skills recentProjectCount={recentProjectCount} currentProject={currentProject} />;
     case 'tools':
       return <Tools />;
     case 'settings':
@@ -66,6 +72,8 @@ export function App() {
   } | null>(null);
   /** Onboarding 中的订阅进度 */
   const [onboardingBusy, setOnboardingBusy] = useState(false);
+  /** 当前项目是否有 project.yaml（供 ProjectSwitcher 显示状态） */
+  const [hasProjectConfig, setHasProjectConfig] = useState(false);
 
   /* ---- 启动时加载 GUI 状态 ---- */
   useEffect(() => {
@@ -76,9 +84,9 @@ export function App() {
   }, []);
 
   /* ---- 加载全局数据（Sidebar 计数 + Onboarding 判定） ---- */
-  const loadGlobalData = useCallback(async () => {
+  const loadGlobalData = useCallback(async (cwd?: string) => {
     try {
-      const result = await listResources('skills');
+      const result = await listResources('skills', cwd);
       const subscribedCount = result.resources.filter(
         (r) => r.subscriptions.length > 0,
       ).length;
@@ -100,6 +108,8 @@ export function App() {
         tools: `${enabledCount}/${totalCount}`,
       });
 
+      setHasProjectConfig(!!result.projectDir);
+
       return result;
     } catch {
       return null;
@@ -108,8 +118,29 @@ export function App() {
 
   /* 启动 + 路由切换时加载 */
   useEffect(() => {
-    void loadGlobalData();
-  }, [route, loadGlobalData]);
+    void loadGlobalData(guiState?.currentProject ?? undefined);
+  }, [route, loadGlobalData, guiState?.currentProject]);
+
+  /* ---- 项目切换（全局，所有页面共享） ---- */
+  function handleSelectProject(projectDir: string) {
+    if (!guiState) return;
+    const normalized = projectDir.replace(/\/+$/, '');
+    const newState = setCurrentProject(guiState, normalized);
+    setGuiState(newState);
+    void saveGuiState(newState);
+    void loadGlobalData(normalized);
+  }
+
+  async function handleOpenDirectory() {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const selected = await invoke<string | null>('open_directory_dialog');
+      if (selected) handleSelectProject(selected);
+    } catch {
+      const dir = window.prompt('输入项目目录路径：');
+      if (dir) handleSelectProject(dir);
+    }
+  }
 
   /* ---- Onboarding 判定（GUI 状态加载后执行一次） ---- */
   useEffect(() => {
@@ -198,17 +229,27 @@ export function App() {
 
       {/* 右侧：主工作区 */}
       <main className="app-main">
-        {/* 顶栏 */}
-        <header className="app-main__header" data-tauri-drag-region>
-          <h1 className="app-main__title" data-tauri-drag-region>
-            {ROUTE_TITLES[route]}
-          </h1>
+        {/* 顶栏：项目切换器（常驻） + 全局操作 */}
+        <header
+          className="app-main__header"
+          data-tauri-drag-region
+          style={{ alignItems: 'center' }}
+        >
+          <ProjectSwitcher
+            currentProject={guiState?.currentProject ?? null}
+            recentProjects={guiState?.recentProjects ?? []}
+            hasProjectConfig={hasProjectConfig}
+            onSelect={handleSelectProject}
+            onOpenDirectory={() => void handleOpenDirectory()}
+          />
           <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
             <ThemeToggle />
           </div>
         </header>
 
-        <div className="app-main__content">{renderPage(route)}</div>
+        <div className="app-main__content" key={guiState?.currentProject ?? '__none__'}>
+          {renderPage(route, guiState?.recentProjects.length ?? 0, guiState?.currentProject ?? null)}
+        </div>
       </main>
 
       {/* Onboarding 蒙层（阶段 5） */}

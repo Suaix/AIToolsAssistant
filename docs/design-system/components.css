@@ -1070,8 +1070,8 @@ ol {
 }
 
 .app-shell--native-titlebar .app-main__header {
-  padding-top: 28px;
-  height: calc(56px + 28px);
+  padding-top: 12px;
+  height: calc(56px + 12px);
   user-select: none;
   -webkit-user-select: none;
 }
@@ -1088,7 +1088,7 @@ ol {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 56px;
+  height: 44px;
   padding: 0 var(--space-8);
   border-bottom: 1px solid var(--color-border-default);
   background: var(--color-bg-default);

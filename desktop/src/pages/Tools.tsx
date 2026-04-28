@@ -169,7 +169,7 @@ export function Tools() {
 
   return (
     <div>
-      {/* 页面 header */}
+      {/* 页面 header：统计 + 操作（无重复标题） */}
       <div
         style={{
           display: 'flex',
@@ -178,28 +178,15 @@ export function Tools() {
           marginBottom: 'var(--space-6)',
         }}
       >
-        <div>
-          <h1
-            style={{
-              fontSize: 'var(--text-h1-size)',
-              fontWeight: 'var(--text-h1-weight)',
-              lineHeight: 'var(--text-h1-line)',
-              color: 'var(--color-text-primary)',
-              margin: 0,
-            }}
-          >
-            已连接工具
-          </h1>
-          <p
-            style={{
-              marginTop: 'var(--space-1)',
-              fontSize: 'var(--text-caption-size)',
-              color: 'var(--color-text-tertiary)',
-            }}
-          >
-            {enabledCount}/{targets.length} 个已启用
-          </p>
-        </div>
+        <p
+          style={{
+            fontSize: 'var(--text-caption-size)',
+            color: 'var(--color-text-tertiary)',
+            margin: 0,
+          }}
+        >
+          {enabledCount}/{targets.length} 个已启用
+        </p>
         <button
           type="button"
           className="btn btn--ghost btn--icon"

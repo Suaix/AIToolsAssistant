@@ -78,17 +78,21 @@ export function ProjectSwitcher({
       {/* 触发按钮 */}
       <button
         type="button"
-        className="btn btn--ghost btn--sm"
+        className="btn btn--ghost"
         onClick={() => setOpen(!open)}
         style={{
           gap: 'var(--space-2)',
-          maxWidth: 280,
+          maxWidth: 360,
           overflow: 'hidden',
+          fontSize: '16px',
+          fontWeight: 600,
+          padding: '0 var(--space-3)',
+          height: '100%',
         }}
         aria-haspopup="listbox"
         aria-expanded={open}
       >
-        <FolderOpen size={14} aria-hidden="true" style={{ flexShrink: 0 }} />
+        <FolderOpen size={20} aria-hidden="true" style={{ flexShrink: 0 }} />
         <span
           style={{
             overflow: 'hidden',

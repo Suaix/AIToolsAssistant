@@ -35,13 +35,6 @@ import {
 } from '../lib/cli';
 import { SyncProgressModal } from '../components/SyncProgressModal';
 import { SubscribePopover } from '../components/SubscribePopover';
-import { ProjectSwitcher } from '../components/ProjectSwitcher';
-import {
-  loadGuiState,
-  saveGuiState,
-  setCurrentProject,
-  type GuiState,
-} from '../lib/gui-state';
 
 /* ============================================================
  * 常量映射
@@ -95,10 +88,18 @@ interface PendingUnsubscribe {
  * 主组件
  * ============================================================ */
 
+/** Skills 组件 Props */
+export interface SkillsProps {
+  /** 使用过本工具的项目总数（来自 gui-state.recentProjects.length） */
+  recentProjectCount?: number;
+  /** 当前选中的项目路径（影响 CLI 的 cwd） */
+  currentProject?: string | null;
+}
+
 /**
  * Skills 页面主组件
  */
-export function Skills() {
+export function Skills({ recentProjectCount = 0, currentProject }: SkillsProps) {
   /** 页面状态：loading | error | ready */
   const [status, setStatus] = useState<'loading' | 'error' | 'ready'>('loading');
   /** 查询结果 */
@@ -119,16 +120,10 @@ export function Skills() {
   const [busy, setBusy] = useState(false);
   /** toast 消息 */
   const [toast, setToast] = useState<{ text: string; kind: 'success' | 'error' } | null>(null);
-  /** GUI 本地状态（项目切换器用） */
-  const [guiState, setGuiState] = useState<GuiState | null>(null);
 
-  /* 首次挂载：加载 GUI 状态 + 数据 */
+  /* 首次挂载加载 */
   useEffect(() => {
-    void (async () => {
-      const gs = await loadGuiState();
-      setGuiState(gs);
-    })();
-    void loadData();
+    void loadData(currentProject ?? undefined);
   }, []);
 
   /* toast 自动消失 */
@@ -161,53 +156,23 @@ export function Skills() {
   }
 
   /* ============================================================
-   * 项目切换（Skills 页专属）
-   * ============================================================ */
-
-  /** 选择项目 */
-  function handleSelectProject(projectDir: string) {
-    if (!guiState) return;
-    /* 路径规范化：去尾部斜杠，保证与 CLI 输出一致 */
-    const normalized = projectDir.replace(/\/+$/, '');
-    const newState = setCurrentProject(guiState, normalized);
-    setGuiState(newState);
-    void saveGuiState(newState);
-    /* 重新加载数据，让 CLI 以选中的项目目录作为 cwd */
-    void loadData(normalized);
-  }
-
-  /** 打开目录选择器 */
-  async function handleOpenDirectory() {
-    try {
-      const { invoke } = await import('@tauri-apps/api/core');
-      const selected = await invoke<string | null>('open_directory_dialog');
-      if (selected) handleSelectProject(selected);
-    } catch {
-      const dir = window.prompt('输入项目目录路径：');
-      if (dir) handleSelectProject(dir);
-    }
-  }
-
-  /* ============================================================
    * 数据分类（Tab 归类）
    * ============================================================ */
   const allResources = result?.resources ?? [];
-  /** CLI cwd 检测到的项目路径（用于 hasProjectConfig 判断） */
-  const cliProjectDir = result?.projectDir;
-  /** 用户选中的项目路径（项目级订阅以此为准） */
-  const selectedProject = guiState?.currentProject ?? null;
+  /** CLI cwd 检测到的项目路径（当 App 层切换项目后，此值即为选中的项目） */
+  const cliProjectDir = result?.projectDir ?? null;
 
   /** User Tab：至少有一个 scope=user 的订阅 */
   const userResources = allResources.filter((r) =>
     r.subscriptions.some((s) => s.scope === 'user'),
   );
   /** Project Tab：以用户选中的项目为准；未选择项目时为空 */
-  const projectResources = selectedProject
+  const projectResources = cliProjectDir
     ? allResources.filter((r) =>
         r.subscriptions.some(
           (s) =>
             s.scope === 'project' &&
-            normalizePath(s.projectDir ?? '') === normalizePath(selectedProject),
+            normalizePath(s.projectDir ?? '') === normalizePath(cliProjectDir),
         ),
       )
     : [];
@@ -248,16 +213,16 @@ export function Skills() {
     setPendingSub(null);
     try {
       /* scope=project 时，先确保项目配置存在（CLI JSON 模式不会自动创建） */
-      if (scope === 'project' && selectedProject) {
+      if (scope === 'project' && cliProjectDir) {
         const { invoke } = await import('@tauri-apps/api/core');
-        await invoke('ensure_project_config', { projectDir: selectedProject });
+        await invoke('ensure_project_config', { projectDir: cliProjectDir });
       }
       const events = await subscribeResource({
         type: 'skills',
         name: pendingSub.dirName,
         scope,
         sync,
-        cwd: scope === 'project' && selectedProject ? selectedProject : undefined,
+        cwd: scope === 'project' && cliProjectDir ? cliProjectDir : undefined,
       });
       /* 检查是否有错误 */
       const errEvt = events.find((e) => e.event === 'error');
@@ -272,7 +237,7 @@ export function Skills() {
         });
       }
       /* 刷新列表 */
-      await loadData(selectedProject ?? undefined);
+      await loadData(cliProjectDir ?? undefined);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setToast({ text: `订阅失败：${msg}`, kind: 'error' });
@@ -294,7 +259,7 @@ export function Skills() {
         name: pendingUnsub.dirName,
         scope: pendingUnsub.scope,
         prune: unsubPrune,
-        cwd: pendingUnsub.scope === 'project' && selectedProject ? selectedProject : undefined,
+        cwd: pendingUnsub.scope === 'project' && cliProjectDir ? cliProjectDir : undefined,
       });
       const errEvt = events.find((e) => e.event === 'error');
       if (errEvt) {
@@ -307,7 +272,7 @@ export function Skills() {
         });
       }
       setUnsubPrune(false);
-      await loadData(selectedProject ?? undefined);
+      await loadData(cliProjectDir ?? undefined);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setToast({ text: `取消订阅失败：${msg}`, kind: 'error' });
@@ -378,7 +343,7 @@ export function Skills() {
 
   return (
     <div>
-      {/* 页面 header */}
+      {/* 页面 header：统计 + 操作区（无重复标题，标题由侧栏标识） */}
       <div
         style={{
           display: 'flex',
@@ -388,46 +353,23 @@ export function Skills() {
           gap: 'var(--space-3)',
         }}
       >
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)' }}>
-            <h1
-              style={{
-                fontSize: 'var(--text-h1-size)',
-                fontWeight: 'var(--text-h1-weight)',
-                lineHeight: 'var(--text-h1-line)',
-                color: 'var(--color-text-primary)',
-                margin: 0,
-              }}
-            >
-              Skills
-            </h1>
-            {/* 项目切换器 */}
-            <ProjectSwitcher
-              currentProject={guiState?.currentProject ?? null}
-              recentProjects={guiState?.recentProjects ?? []}
-              hasProjectConfig={!!cliProjectDir}
-              onSelect={handleSelectProject}
-              onOpenDirectory={() => void handleOpenDirectory()}
-            />
-          </div>
-          <p
-            style={{
-              marginTop: 'var(--space-1)',
-              fontSize: 'var(--text-caption-size)',
-              color: 'var(--color-text-tertiary)',
-            }}
-          >
-            共 {allResources.length} 项 · 已订阅{' '}
-            {allResources.length - unusedResources.length} · 候选{' '}
-            {unusedResources.length}
-          </p>
-        </div>
+        <p
+          style={{
+            fontSize: 'var(--text-body-size)',
+            color: 'var(--color-text-primary)',
+            fontWeight: 500,
+            margin: 0,
+          }}
+        >
+          共 {allResources.length} 项 · 订阅项目{' '}
+          {recentProjectCount}
+        </p>
         <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
           <button
             type="button"
             className="btn btn--ghost btn--icon"
             aria-label="刷新"
-            onClick={() => void loadData()}
+            onClick={() => void loadData(cliProjectDir ?? undefined)}
           >
             <RefreshCw size={18} aria-hidden="true" />
           </button>
@@ -468,12 +410,8 @@ export function Skills() {
         {currentResources.length === 0 ? (
           <TabEmpty
             tab={activeTab}
-            projectDir={selectedProject}
-            hasProjectConfig={
-              !!selectedProject &&
-              !!cliProjectDir &&
-              normalizePath(cliProjectDir) === normalizePath(selectedProject)
-            }
+            projectDir={cliProjectDir}
+            hasProjectConfig={!!cliProjectDir}
           />
         ) : (
           <div className="card-grid">
@@ -482,7 +420,7 @@ export function Skills() {
                 key={`${activeTab}-${item.dirName}`}
                 item={item}
                 tab={activeTab}
-                projectDir={selectedProject}
+                projectDir={cliProjectDir}
                 onSync={() =>
                   setSyncTask({
                     kind: 'one',
@@ -524,7 +462,7 @@ export function Skills() {
       {pendingSub && (
         <SubscribePopover
           resourceName={pendingSub.displayName}
-          hasProject={!!selectedProject}
+          hasProject={!!cliProjectDir}
           onConfirm={(scope, sync) => void handleSubscribe(scope, sync)}
           onCancel={() => setPendingSub(null)}
         />
