@@ -1,0 +1,100 @@
+# ============================================================
+# 工作流全局配置（Workflow Global Configuration）
+# ============================================================
+# 说明：本文件是工作流系统的全局配置，定义编号规则、阶段和门禁。
+# 位置：<project-root>/.workflow/workflow.config.yaml
+# ============================================================
+
+# --- ID 计数器 ---
+# 每次创建新任务时，对应类型的计数器 +1
+counters:
+  FEAT: 1        # 新功能
+  FIX: 0         # 缺陷修复
+  REFACTOR: 0    # 重构
+
+# --- 任务类型定义 ---
+types:
+  FEAT:
+    label: "新功能"
+    description: "新增用户可感知的功能"
+  FIX:
+    label: "缺陷修复"
+    description: "修复已有功能的缺陷"
+  REFACTOR:
+    label: "重构"
+    description: "不改变外部行为的代码结构优化"
+
+# --- 阶段定义（按顺序） ---
+phases:
+  - id: analysis
+    name: "需求分析"
+    status_key: "ANALYSIS"
+    output: "01-requirements.md"
+    template: "templates/01-requirements.tpl.md"
+
+  - id: design
+    name: "UI/UX 设计"
+    status_key: "DESIGN"
+    output: "02-design.md"
+    template: "templates/02-design.tpl.md"
+
+  - id: technical
+    name: "技术方案"
+    status_key: "TECHNICAL"
+    output: "03-technical.md"
+    template: "templates/03-technical.tpl.md"
+
+  - id: coding
+    name: "编码实现"
+    status_key: "CODING"
+    output: "04-coding-log.md"
+    template: "templates/04-coding-log.tpl.md"
+
+  - id: testing
+    name: "测试验收"
+    status_key: "TESTING"
+    output: "05-testing.md"
+    template: "templates/05-testing.tpl.md"
+
+# --- 门禁定义 ---
+# 规则：未通过的检查项必须在 skipped 中标注 reason，否则不允许进入下一阶段
+gates:
+  analysis_to_design:
+    from: analysis
+    to: design
+    checklist:
+      - "需求范围明确"
+      - "验收标准（AC）已定义"
+      - "用户故事完整"
+
+  design_to_technical:
+    from: design
+    to: technical
+    checklist:
+      - "页面流程完整"
+      - "组件规范引用"
+      - "交互状态覆盖（空态/加载/错误/成功）"
+
+  technical_to_coding:
+    from: technical
+    to: coding
+    checklist:
+      - "架构设计完整"
+      - "接口定义明确"
+      - "影响范围已评估"
+
+  coding_to_testing:
+    from: coding
+    to: testing
+    checklist:
+      - "自测通过"
+      - "代码已提交"
+      - "编码日志已更新"
+
+  testing_to_archived:
+    from: testing
+    to: archived
+    checklist:
+      - "功能验收通过"
+      - "UI 走查通过"
+      - "文档归档完成"

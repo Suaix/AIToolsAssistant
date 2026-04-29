@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FEAT-001 概览页原型 · AIToolsAssistant</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    /* ================================================================
+     * 1. Design Tokens（内联，引用 tokens.css 定义）
+     * ================================================================ */
+    :root {
+      --teal-50:#F0FDFA;--teal-100:#CCFBF1;--teal-200:#99F6E4;--teal-300:#5EEAD4;
+      --teal-400:#2DD4BF;--teal-500:#14B8A6;--teal-600:#0D9488;--teal-700:#0F766E;
+      --teal-800:#115E59;--teal-900:#134E4A;--teal-950:#042F2E;
+      --slate-0:#FFFFFF;--slate-50:#F8FAFC;--slate-100:#F1F5F9;--slate-200:#E2E8F0;
+      --slate-300:#CBD5E1;--slate-400:#94A3B8;--slate-500:#64748B;--slate-600:#475569;
+      --slate-700:#334155;--slate-800:#1E293B;--slate-900:#0F172A;--slate-950:#020617;
+      --mint-100:#DCFCE7;--mint-400:#4ADE80;--mint-500:#22C55E;--mint-600:#16A34A;--mint-900:#14532D;
+      --amber-100:#FEF3C7;--amber-400:#FBBF24;--amber-500:#F59E0B;--amber-600:#D97706;--amber-900:#78350F;
+      --rose-100:#FFE4E6;--rose-400:#FB7185;--rose-500:#F43F5E;--rose-600:#E11D48;--rose-900:#881337;
+
+      --font-sans:"Inter","PingFang SC",-apple-system,BlinkMacSystemFont,sans-serif;
+      --font-mono:"JetBrains Mono","SF Mono","Menlo",monospace;
+
+      --space-1:4px;--space-2:8px;--space-3:12px;--space-4:16px;--space-5:20px;
+      --space-6:24px;--space-8:32px;--space-10:40px;
+
+      --radius-sm:4px;--radius-md:8px;--radius-lg:12px;--radius-full:9999px;
+
+      --duration-fast:160ms;--duration-normal:240ms;
+      --easing-standard:cubic-bezier(0.2,0,0,1);
+
+      --shadow-sm:0 2px 4px rgba(0,0,0,0.5);
+      --shadow-md:0 4px 12px rgba(0,0,0,0.6);
+      --shadow-focus:0 0 0 3px rgba(45,212,191,0.32);
+    }
+
+    /* 暗色模式语义 Token（默认） */
+    :root, [data-theme="dark"] {
+      --color-bg-canvas:#020617;--color-bg-default:#0F172A;--color-bg-subtle:#1E293B;
+      --color-bg-hover:#1E293B;--color-bg-overlay:rgba(2,6,23,0.72);
+      --color-text-primary:#F8FAFC;--color-text-secondary:#CBD5E1;
+      --color-text-tertiary:#94A3B8;--color-text-disabled:#475569;
+      --color-border-default:#334155;--color-border-strong:#475569;--color-border-brand:#2DD4BF;
+      --color-brand-default:#2DD4BF;--color-brand-hover:#5EEAD4;--color-brand-subtle:#042F2E;
+      --color-success:#4ADE80;--color-success-subtle:#14532D;--color-success-text:#4ADE80;
+      --color-warning:#FBBF24;--color-warning-subtle:#78350F;--color-warning-text:#FBBF24;
+      --color-danger:#FB7185;--color-danger-subtle:#881337;--color-danger-text:#FB7185;
+    }
+
+    /* 浅色模式语义 Token */
+    [data-theme="light"] {
+      --color-bg-canvas:#F8FAFC;--color-bg-default:#FFFFFF;--color-bg-subtle:#F1F5F9;
+      --color-bg-hover:#F1F5F9;--color-bg-overlay:rgba(15,23,42,0.48);
+      --color-text-primary:#0F172A;--color-text-secondary:#475569;
+      --color-text-tertiary:#64748B;--color-text-disabled:#CBD5E1;
+      --color-border-default:#E2E8F0;--color-border-strong:#CBD5E1;--color-border-brand:#14B8A6;
+      --color-brand-default:#14B8A6;--color-brand-hover:#0D9488;--color-brand-subtle:#F0FDFA;
+      --color-success:#22C55E;--color-success-subtle:#DCFCE7;--color-success-text:#16A34A;
+      --color-warning:#F59E0B;--color-warning-subtle:#FEF3C7;--color-warning-text:#D97706;
+      --color-danger:#F43F5E;--color-danger-subtle:#FFE4E6;--color-danger-text:#E11D48;
+      --shadow-sm:0 2px 4px rgba(15,23,42,0.06);
+      --shadow-md:0 4px 12px rgba(15,23,42,0.08);
+      --shadow-focus:0 0 0 3px rgba(20,184,166,0.24);
+    }
+
+    /* ================================================================
+     * 2. 基础重置
+     * ================================================================ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html {
+      font-family: var(--font-sans);
+      font-size: 14px;
+      line-height: 22px;
+      color: var(--color-text-primary);
+      background: var(--color-bg-canvas);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ================================================================
+     * 3. App Shell（模拟桌面端结构）
+     * ================================================================ */
+    .app-shell {
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* ---- Sidebar ---- */
+    .sidebar {
+      width: 220px;
+      flex-shrink: 0;
+      background: var(--color-bg-default);
+      border-right: 1px solid var(--color-border-default);
+      display: flex;
+      flex-direction: column;
+      padding: var(--space-4) 0;
+    }
+    .sidebar__brand {
+      display: flex;
+      align-items: center;
+      gap: var(--space-2);
+      padding: var(--space-2) var(--space-4);
+      margin-bottom: var(--space-4);
+    }
+    .sidebar__logo {
+      width: 28px; height: 28px;
+      background: var(--color-brand-default);
+      color: var(--color-bg-canvas);
+      border-radius: var(--radius-md);
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: 14px;
+    }
+    .sidebar__name {
+      font-weight: 600;
+      font-size: 15px;
+      color: var(--color-text-primary);
+    }
+    .sidebar__group {
+      list-style: none;
+      padding: var(--space-1) var(--space-2);
+    }
+    .sidebar__group + .sidebar__group {
+      margin-top: var(--space-1);
+      padding-top: var(--space-1);
+      border-top: 1px solid var(--color-border-default);
+    }
+    .sidebar__spacer { flex: 1; }
+
+    /* ---- Nav Item ---- */
+    .nav-item {
+      display: flex; align-items: center; gap: var(--space-2);
+      padding: 6px var(--space-3);
+      border-radius: var(--radius-md);
+      color: var(--color-text-secondary);
+      text-decoration: none;
+      font-size: 13px;
+      cursor: pointer;
+      transition: background var(--duration-fast) var(--easing-standard),
+                  color var(--duration-fast) var(--easing-standard);
+    }
+    .nav-item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+    .nav-item--active {
+      background: var(--color-brand-subtle);
+      color: var(--color-brand-default);
+      font-weight: 500;
+    }
+    .nav-item--disabled {
+      opacity: 0.45;
+      cursor: default;
+    }
+    .nav-item--disabled:hover { background: transparent; color: var(--color-text-secondary); }
+    .nav-item__icon { width: 18px; height: 18px; flex-shrink: 0; }
+    .nav-item__badge {
+      margin-left: auto;
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+      color: var(--color-text-tertiary);
+    }
+
+    /* ---- Main Area ---- */
+    .app-main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .app-main__header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: var(--space-3) var(--space-6);
+      border-bottom: 1px solid var(--color-border-default);
+      background: var(--color-bg-default);
+      min-height: 48px;
+    }
+    .app-main__content {
+      flex: 1;
+      overflow-y: auto;
+      padding: var(--space-6);
+    }
+
+    /* ---- 主题切换按钮 ---- */
+    .theme-toggle {
+      background: none; border: 1px solid var(--color-border-default);
+      border-radius: var(--radius-md);
+      padding: 6px 10px;
+      color: var(--color-text-secondary);
+      cursor: pointer;
+      font-size: 12px;
+      font-family: var(--font-sans);
+      transition: all var(--duration-fast) var(--easing-standard);
+    }
+    .theme-toggle:hover {
+      background: var(--color-bg-hover);
+      color: var(--color-text-primary);
+    }
+
+    /* ---- 项目切换器（简化） ---- */
+    .project-switcher {
+      display: flex; align-items: center; gap: var(--space-2);
+      padding: 4px var(--space-3);
+      border-radius: var(--radius-md);
+      font-size: 13px;
+      color: var(--color-text-secondary);
+    }
+    .project-switcher__dot {
+      width: 8px; height: 8px;
+      border-radius: var(--radius-full);
+      background: var(--color-success);
+    }
+
+    /* ================================================================
+     * 4. Status Banner（全局异常提示条）
+     * ================================================================ */
+    .status-banner {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      padding: var(--space-3) var(--space-4);
+      background: var(--color-warning-subtle);
+      border: 1px solid var(--color-border-default);
+      border-radius: var(--radius-md);
+      margin-bottom: var(--space-5);
+    }
+    .status-banner__icon {
+      width: 18px; height: 18px;
+      color: var(--color-warning-text);
+      flex-shrink: 0;
+    }
+    .status-banner__text {
+      flex: 1;
+      font-size: 13px;
+      color: var(--color-warning-text);
+    }
+    .status-banner__text code {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      background: var(--color-bg-subtle);
+      padding: 1px 6px;
+      border-radius: var(--radius-sm);
+    }
+    .status-banner__action {
+      background: none; border: 1px solid var(--color-border-default);
+      border-radius: var(--radius-md);
+      padding: 4px 12px;
+      color: var(--color-text-secondary);
+      cursor: pointer;
+      font-size: 12px;
+      font-family: var(--font-sans);
+      transition: all var(--duration-fast) var(--easing-standard);
+    }
+    .status-banner__action:hover {
+      background: var(--color-bg-hover);
+      color: var(--color-text-primary);
+    }
+
+    /* ================================================================
+     * 5. Overview Card（概览数据卡片）
+     * ================================================================ */
+    .overview-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--space-4);
+    }
+    .overview-card {
+      background: var(--color-bg-default);
+      border: 1px solid var(--color-border-default);
+      border-radius: var(--radius-lg);
+      padding: var(--space-5);
+      transition: box-shadow var(--duration-fast) var(--easing-standard),
+                  border-color var(--duration-fast) var(--easing-standard);
+      cursor: pointer;
+      position: relative;
+    }
+    .overview-card:hover {
+      box-shadow: var(--shadow-sm);
+      border-color: var(--color-border-strong);
+    }
+    .overview-card:focus-visible {
+      outline: none;
+      box-shadow: var(--shadow-focus);
+    }
+
+    /* 禁用态（功能未实现） */
+    .overview-card--disabled {
+      opacity: 0.5;
+      cursor: default;
+      pointer-events: none;
+    }
+    .overview-card--disabled:hover {
+      box-shadow: none;
+      border-color: var(--color-border-default);
+    }
+
+    .overview-card__header {
+      display: flex;
+      align-items: center;
+      gap: var(--space-2);
+      margin-bottom: var(--space-4);
+    }
+    .overview-card__icon {
+      width: 20px; height: 20px;
+      color: var(--color-text-tertiary);
+    }
+    .overview-card--active .overview-card__icon {
+      color: var(--color-brand-default);
+    }
+    .overview-card__title {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--color-text-secondary);
+      flex: 1;
+    }
+    .overview-card__arrow {
+      width: 16px; height: 16px;
+      color: var(--color-text-tertiary);
+      opacity: 0;
+      transform: translateX(-4px);
+      transition: opacity var(--duration-fast) var(--easing-standard),
+                  transform var(--duration-fast) var(--easing-standard);
+    }
+    .overview-card:hover .overview-card__arrow {
+      opacity: 1;
+      transform: translateX(0);
+    }
+    .overview-card--disabled .overview-card__arrow { display: none; }
+
+    .overview-card__metric {
+      font-size: 32px;
+      font-weight: 700;
+      line-height: 1;
+      color: var(--color-text-primary);
+      margin-bottom: var(--space-1);
+      font-variant-numeric: tabular-nums;
+    }
+    .overview-card__label {
+      font-size: 13px;
+      color: var(--color-text-secondary);
+      margin-bottom: var(--space-3);
+    }
+    .overview-card__sub {
+      font-size: 12px;
+      color: var(--color-text-tertiary);
+      display: flex;
+      gap: var(--space-2);
+      align-items: center;
+    }
+    .overview-card__sub .dot {
+      width: 3px; height: 3px;
+      border-radius: var(--radius-full);
+      background: var(--color-text-disabled);
+    }
+    .overview-card__sub .warning {
+      color: var(--color-warning-text);
+      font-weight: 500;
+    }
+    .overview-card__sub .coming-soon {
+      font-style: italic;
+      color: var(--color-text-disabled);
+    }
+
+    /* ================================================================
+     * 6. 分隔区
+     * ================================================================ */
+    .section-divider {
+      height: 1px;
+      background: var(--color-border-default);
+      margin: var(--space-6) 0;
+    }
+
+    /* ================================================================
+     * 7. 下区标题
+     * ================================================================ */
+    .section-label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--color-text-tertiary);
+      margin-bottom: var(--space-3);
+    }
+
+    /* ================================================================
+     * 8. 页面标题（隐藏的，用于可视化标注）
+     * ================================================================ */
+    .prototype-badge {
+      position: fixed;
+      top: var(--space-2);
+      right: var(--space-2);
+      background: var(--color-danger-subtle);
+      color: var(--color-danger-text);
+      font-size: 10px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: var(--radius-full);
+      z-index: 100;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <!-- 原型标记 -->
+  <div class="prototype-badge">FEAT-001 PROTOTYPE</div>
+
+  <div class="app-shell">
+    <!-- ======== Sidebar ======== -->
+    <nav class="sidebar">
+      <div class="sidebar__brand">
+        <span class="sidebar__logo">A</span>
+        <span class="sidebar__name">aitools</span>
+      </div>
+
+      <!-- 第一组：状态总览 -->
+      <ul class="sidebar__group">
+        <li>
+          <a class="nav-item nav-item--active" href="#">
+            <svg class="nav-item__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            概览
+          </a>
+        </li>
+      </ul>
+
+      <!-- 第二组：资源对象 -->
+      <ul class="sidebar__group">
+        <li>
+          <a class="nav-item" href="#">
+            <svg class="nav-item__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16.5 9.4-9-5.19M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+            Skills
+            <span class="nav-item__badge">12</span>
+          </a>
+        </li>
+        <li><a class="nav-item nav-item--disabled" href="#">
+          <svg class="nav-item__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          Commands <span class="nav-item__badge">—</span></a></li>
+        <li><a class="nav-item nav-item--disabled" href="#">
+          <svg class="nav-item__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>
+          Agents <span class="nav-item__badge">—</span></a></li>
+        <li><a class="nav-item nav-item--disabled" href="#">
+          <svg class="nav-item__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+          Rules <span class="nav-item__badge">—</span></a></li>
+      </ul>
+
+      <!-- 第三组：外部关系 -->
+      <ul class="sidebar__group">
+        <li>
+          <a class="nav-item" href="#">
+            <svg class="nav-item__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+            已连接工具
+            <span class="nav-item__badge">3/5</span>
+          </a>
+        </li>
+        <li><a class="nav-item nav-item--disabled" href="#">
+          <svg class="nav-item__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+          项目 <span class="nav-item__badge">—</span></a></li>
+      </ul>
+
+      <div class="sidebar__spacer"></div>
+
+      <!-- 底部：设置 -->
+      <ul class="sidebar__group">
+        <li><a class="nav-item" href="#">
+          <svg class="nav-item__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          设置</a></li>
+      </ul>
+    </nav>
+
+    <!-- ======== Main ======== -->
+    <main class="app-main">
+      <!-- 顶栏 -->
+      <header class="app-main__header">
+        <div class="project-switcher">
+          <span class="project-switcher__dot"></span>
+          ~/workspace/my-project
+        </div>
+        <button class="theme-toggle" onclick="toggleTheme()">切换主题</button>
+      </header>
+
+      <!-- 内容区 -->
+      <div class="app-main__content">
+
+        <!-- ===== Banner（条件渲染演示，默认隐藏） ===== -->
+        <div class="status-banner" id="banner" style="display: none;">
+          <svg class="status-banner__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          <span class="status-banner__text">未检测到 aitools CLI，请执行 <code>npm i -g aitools-cli</code> 安装</span>
+          <button class="status-banner__action">重新检查</button>
+        </div>
+
+        <!-- ===== 上区：资源对象 2×2 ===== -->
+        <div class="section-label">资源概览</div>
+        <div class="overview-grid">
+
+          <!-- Skills（活跃） -->
+          <div class="overview-card overview-card--active" tabindex="0" role="button" aria-label="查看 Skills">
+            <div class="overview-card__header">
+              <svg class="overview-card__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16.5 9.4-9-5.19M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+              <span class="overview-card__title">Skills</span>
+              <svg class="overview-card__arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+            </div>
+            <div class="overview-card__metric">12</div>
+            <div class="overview-card__label">已订阅</div>
+            <div class="overview-card__sub">
+              <span>3 候选</span>
+              <span class="dot"></span>
+              <span class="warning">1 待同步</span>
+            </div>
+          </div>
+
+          <!-- Commands（占位） -->
+          <div class="overview-card overview-card--disabled">
+            <div class="overview-card__header">
+              <svg class="overview-card__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+              <span class="overview-card__title">Commands</span>
+            </div>
+            <div class="overview-card__metric">0</div>
+            <div class="overview-card__label">&nbsp;</div>
+            <div class="overview-card__sub"><span class="coming-soon">即将推出</span></div>
+          </div>
+
+          <!-- Agents（占位） -->
+          <div class="overview-card overview-card--disabled">
+            <div class="overview-card__header">
+              <svg class="overview-card__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>
+              <span class="overview-card__title">Agents</span>
+            </div>
+            <div class="overview-card__metric">0</div>
+            <div class="overview-card__label">&nbsp;</div>
+            <div class="overview-card__sub"><span class="coming-soon">即将推出</span></div>
+          </div>
+
+          <!-- Rules（占位） -->
+          <div class="overview-card overview-card--disabled">
+            <div class="overview-card__header">
+              <svg class="overview-card__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+              <span class="overview-card__title">Rules</span>
+            </div>
+            <div class="overview-card__metric">0</div>
+            <div class="overview-card__label">&nbsp;</div>
+            <div class="overview-card__sub"><span class="coming-soon">即将推出</span></div>
+          </div>
+
+        </div>
+
+        <!-- ===== 分隔 ===== -->
+        <div class="section-divider"></div>
+
+        <!-- ===== 下区：外部关系 1×2 ===== -->
+        <div class="section-label">环境与连接</div>
+        <div class="overview-grid">
+
+          <!-- 已连接工具（活跃） -->
+          <div class="overview-card overview-card--active" tabindex="0" role="button" aria-label="查看已连接工具">
+            <div class="overview-card__header">
+              <svg class="overview-card__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+              <span class="overview-card__title">已连接工具</span>
+              <svg class="overview-card__arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+            </div>
+            <div class="overview-card__metric">3<span style="font-size:20px;font-weight:500;color:var(--color-text-tertiary)"> / 5</span></div>
+            <div class="overview-card__label">已启用</div>
+            <div class="overview-card__sub">
+              <span>Cursor · Claude Code · CodeBuddy</span>
+            </div>
+          </div>
+
+          <!-- 项目（占位） -->
+          <div class="overview-card overview-card--disabled">
+            <div class="overview-card__header">
+              <svg class="overview-card__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+              <span class="overview-card__title">项目</span>
+            </div>
+            <div class="overview-card__metric">1</div>
+            <div class="overview-card__label">当前项目</div>
+            <div class="overview-card__sub"><span class="coming-soon">即将推出</span></div>
+          </div>
+
+        </div>
+
+      </div>
+    </main>
+  </div>
+
+  <script>
+    /* 主题切换 */
+    function toggleTheme() {
+      const html = document.documentElement;
+      const current = html.getAttribute('data-theme');
+      html.setAttribute('data-theme', current === 'dark' ? 'light' : 'dark');
+    }
+
+    /* Banner 演示切换 */
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'b') {
+        const banner = document.getElementById('banner');
+        banner.style.display = banner.style.display === 'none' ? 'flex' : 'none';
+      }
+    });
+  </script>
+</body>
+</html>
