@@ -1396,3 +1396,148 @@ ol {
   0%, 100% { opacity: 0.5; }
   50% { opacity: 1; }
 }
+
+/* ============================================================================
+ * 15. SettingsSection 设置区块容器
+ *     FEAT-002：设置页分区布局
+ * ============================================================================ */
+
+.settings-section {
+  background: var(--color-bg-default);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+}
+
+.settings-section + .settings-section {
+  margin-top: var(--space-5);
+}
+
+.settings-section__title {
+  font-size: var(--text-h3-size);
+  font-weight: var(--text-h3-weight);
+  line-height: var(--text-h3-line);
+  color: var(--color-text-primary);
+  margin-bottom: var(--space-1);
+}
+
+.settings-section__desc {
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line);
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-4);
+}
+
+/* ============================================================================
+ * 16. PathDisplay 路径展示行
+ *     FEAT-002：源目录展示组件
+ * ============================================================================ */
+
+.path-display {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  background: var(--color-bg-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+}
+
+.path-display__icon {
+  width: 20px;
+  height: 20px;
+  color: var(--color-text-tertiary);
+  flex-shrink: 0;
+}
+
+.path-display__path {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line);
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.path-display__path--disabled {
+  color: var(--color-text-disabled);
+}
+
+/* ============================================================================
+ * 17. ThemeSelector 主题三选一
+ *     FEAT-002：设置页主题偏好
+ * ============================================================================ */
+
+.theme-selector {
+  display: inline-flex;
+  background: var(--color-bg-subtle);
+  border-radius: var(--radius-md);
+  padding: 3px;
+}
+
+.theme-selector__option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line);
+  color: var(--color-text-tertiary);
+  transition:
+    background var(--duration-fast) var(--easing-standard),
+    color var(--duration-fast) var(--easing-standard),
+    box-shadow var(--duration-fast) var(--easing-standard);
+}
+
+.theme-selector__option:hover {
+  color: var(--color-text-secondary);
+}
+
+.theme-selector__option--active {
+  background: var(--color-bg-default);
+  color: var(--color-text-primary);
+  box-shadow: var(--shadow-xs);
+}
+
+.theme-selector__icon {
+  width: 16px;
+  height: 16px;
+}
+
+/* ============================================================================
+ * 18. VersionRow 版本信息行
+ *     FEAT-002：关于区版本展示
+ * ============================================================================ */
+
+.version-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) 0;
+}
+
+.version-row + .version-row {
+  border-top: 1px solid var(--color-border-default);
+}
+
+.version-row__label {
+  font-size: var(--text-body-sm-size);
+  color: var(--color-text-secondary);
+}
+
+.version-row__value {
+  font-family: var(--font-mono);
+  font-size: var(--text-body-sm-size);
+  color: var(--color-text-primary);
+}
+
+.version-row__value--disabled {
+  color: var(--color-text-disabled);
+  font-style: italic;
+}

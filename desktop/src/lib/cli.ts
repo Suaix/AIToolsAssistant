@@ -388,6 +388,83 @@ export async function setTargetEnabled(
 }
 
 /* ============================================================
+ * Config 管理（FEAT-002 新增）
+ * ============================================================ */
+
+/**
+ * 获取配置项值
+ *
+ * 调用 `aitools config <key>` 并从 JSON 事件中提取 value
+ *
+ * @param key 配置项名（如 'root'）
+ * @returns 配置值，获取失败返回 null
+ */
+export async function getConfigValue(key: string): Promise<string | null> {
+  try {
+    const events = await invokeCli(['config', key]);
+    const getEvent = events.find(
+      (e) => e.event === 'config.get',
+    ) as { event: 'config.get'; data: { key: string; value: string } } | undefined;
+    return getEvent?.data.value ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 更改根目录路径
+ *
+ * @param newPath 新的根目录路径
+ * @param migrate 是否迁移旧目录资源
+ * @returns 成功/失败信息
+ */
+export async function setConfigRoot(
+  newPath: string,
+  migrate?: boolean,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const args = ['config', 'root', newPath];
+    if (migrate) args.push('--migrate');
+    const events = await invokeCli(args);
+
+    /** 检查错误事件 */
+    const errorEvent = events.find(
+      (e): e is Extract<JsonEvent, { event: 'error' }> => e.event === 'error',
+    );
+    if (errorEvent) {
+      return { success: false, error: errorEvent.data.message };
+    }
+
+    return { success: true };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { success: false, error: message };
+  }
+}
+
+/**
+ * 获取 CLI 版本号
+ *
+ * 调用 aitools --version 并解析输出
+ *
+ * @returns 版本号字符串（如 "0.4.2"），失败返回 null
+ */
+export async function getCliVersion(): Promise<string | null> {
+  try {
+    const result = await invoke<{ exit_code: number; stdout: string; stderr: string }>(
+      'invoke_cli',
+      { args: ['--version'], cwd: null },
+    );
+    if (result.exit_code === 0 && result.stdout) {
+      return result.stdout.trim();
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/* ============================================================
  * 流式调用：sync 命令专用
  * ============================================================ */
 

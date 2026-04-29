@@ -16,6 +16,7 @@ import {
   targetEnableCommand,
   targetDisableCommand,
 } from './commands/target.js';
+import { configCommand } from './commands/config.js';
 import { setReporterMode } from './utils/reporter.js';
 
 /** 实例化命令行程序对象 */
@@ -147,6 +148,24 @@ targetCmd
   .description('禁用指定 target（使其退出 sync；不删除已同步的目录）')
   .argument('<name>', 'target 名称（如 codebuddy、claude-code）')
   .action(targetDisableCommand);
+
+/**
+ * 注册 config 命令（FEAT-002 新增）
+ *
+ * 语义：类 git config 的隐式 get/set
+ *   aitools config root              → 查看根目录
+ *   aitools config root ~/new-path   → 更改根目录
+ *   aitools config root ~/new-path --migrate → 更改 + 迁移
+ *   aitools config --list            → 列出所有配置
+ */
+program
+  .command('config')
+  .description('查看或修改配置项。key 可选值: root（资源根目录）')
+  .argument('[key]', '配置项名称: root')
+  .argument('[value]', '新值（省略则查看当前值）')
+  .option('--migrate', '更改 root 时将旧目录资源迁移到新目录')
+  .option('--list', '列出所有配置项')
+  .action(configCommand);
 
 /** 执行命令行参数解析 */
 program.parse();
