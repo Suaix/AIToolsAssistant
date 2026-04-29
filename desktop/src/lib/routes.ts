@@ -19,7 +19,7 @@ export type RouteName =
 
 /** 路由的显示标题（用于 app header） */
 export const ROUTE_TITLES: Record<RouteName, string> = {
-  dashboard: '工作台',
+  dashboard: '概览',
   skills: 'Skills',
   'skill-detail': 'Skill 详情',
   tools: '已连接工具',

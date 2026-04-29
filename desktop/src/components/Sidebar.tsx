@@ -64,7 +64,7 @@ export interface SidebarProps {
 export function Sidebar({ active, onNavigate, counts }: SidebarProps) {
   /* 构建动态导航项配置 */
   const groupStatus: NavItemConfig[] = [
-    { route: 'dashboard', icon: Home, label: '工作台' },
+    { route: 'dashboard', icon: Home, label: '概览' },
   ];
 
   const groupResources: NavItemConfig[] = [

@@ -1173,3 +1173,226 @@ ol {
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: var(--space-4);
 }
+
+/* ============================================================================
+ * 13. StatusBanner 全局异常提示条
+ *     FEAT-001：替代原 HeroCard 的 cli_missing / error 态
+ * ============================================================================ */
+
+.status-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-5);
+}
+
+/** 警告态 */
+.status-banner--warning {
+  background: var(--color-warning-subtle);
+}
+.status-banner--warning .status-banner__icon,
+.status-banner--warning .status-banner__text {
+  color: var(--color-warning-text);
+}
+
+/** 错误态 */
+.status-banner--error {
+  background: var(--color-danger-subtle);
+}
+.status-banner--error .status-banner__icon,
+.status-banner--error .status-banner__text {
+  color: var(--color-danger-text);
+}
+
+.status-banner__icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.status-banner__text {
+  flex: 1;
+  font-size: var(--text-body-sm-size);
+  line-height: var(--text-body-sm-line);
+}
+
+.status-banner__text code {
+  font-family: var(--font-mono);
+  font-size: var(--text-code-size);
+  background: var(--color-bg-subtle);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+}
+
+/* ============================================================================
+ * 14. OverviewCard 概览数据卡片
+ *     FEAT-001：概览页核心展示组件
+ * ============================================================================ */
+
+/** 概览区 2×2 网格 */
+.overview-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+}
+
+/** 分隔线 */
+.overview-divider {
+  height: 1px;
+  background: var(--color-border-default);
+  margin: var(--space-6) 0;
+}
+
+/** 区域标签 */
+.overview-section-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-tertiary);
+  margin-bottom: var(--space-3);
+}
+
+/** 卡片主体 */
+.overview-card {
+  background: var(--color-bg-default);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  transition:
+    box-shadow var(--duration-fast) var(--easing-standard),
+    border-color var(--duration-fast) var(--easing-standard);
+  cursor: pointer;
+}
+.overview-card:hover {
+  box-shadow: var(--shadow-sm);
+  border-color: var(--color-border-strong);
+}
+.overview-card:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}
+
+/** 禁用态（功能未实现） */
+.overview-card--disabled {
+  opacity: 0.5;
+  cursor: default;
+  pointer-events: none;
+}
+
+/** 卡片头部 */
+.overview-card__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+/** 图标 */
+.overview-card__icon {
+  width: 20px;
+  height: 20px;
+  color: var(--color-text-tertiary);
+}
+.overview-card--active .overview-card__icon {
+  color: var(--color-brand-default);
+}
+
+/** 标题 */
+.overview-card__title {
+  font-size: var(--text-body-sm-size);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  flex: 1;
+}
+
+/** 箭头 */
+.overview-card__arrow {
+  width: 16px;
+  height: 16px;
+  color: var(--color-text-tertiary);
+  opacity: 0;
+  transform: translateX(-4px);
+  transition:
+    opacity var(--duration-fast) var(--easing-standard),
+    transform var(--duration-fast) var(--easing-standard);
+}
+.overview-card:hover .overview-card__arrow {
+  opacity: 1;
+  transform: translateX(0);
+}
+.overview-card--disabled .overview-card__arrow {
+  display: none;
+}
+
+/** 主数字 */
+.overview-card__metric {
+  font-size: var(--text-display-size);
+  font-weight: 700;
+  line-height: 1;
+  color: var(--color-text-primary);
+  margin-bottom: var(--space-1);
+  font-variant-numeric: tabular-nums;
+}
+
+/** 主数字的次级部分（如 "/ 5"） */
+.overview-card__metric-secondary {
+  font-size: var(--text-h2-size);
+  font-weight: 500;
+  color: var(--color-text-tertiary);
+}
+
+/** 主标签 */
+.overview-card__label {
+  font-size: var(--text-body-sm-size);
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-3);
+}
+
+/** 次要指标行 */
+.overview-card__sub {
+  font-size: var(--text-caption-size);
+  line-height: var(--text-caption-line);
+  color: var(--color-text-tertiary);
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+/** 分隔点 */
+.overview-card__dot {
+  width: 3px;
+  height: 3px;
+  border-radius: var(--radius-full);
+  background: var(--color-text-disabled);
+}
+
+/** 警告高亮（如待同步数） */
+.overview-card__warning {
+  color: var(--color-warning-text);
+  font-weight: 500;
+}
+
+/** 占位文案 */
+.overview-card__coming-soon {
+  font-style: italic;
+  color: var(--color-text-disabled);
+}
+
+/** 骨架屏占位 */
+.overview-card__skeleton {
+  display: inline-block;
+  width: 48px;
+  height: 32px;
+  background: var(--color-bg-subtle);
+  border-radius: var(--radius-sm);
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes skeleton-shimmer {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}

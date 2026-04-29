@@ -14,12 +14,13 @@ import { Sidebar, type SidebarCounts } from './components/Sidebar';
 import { ThemeToggle } from './components/ThemeToggle';
 import { ProjectSwitcher } from './components/ProjectSwitcher';
 import { OnboardingWizard } from './components/OnboardingWizard';
-import { Dashboard } from './pages/Dashboard';
+import { Overview, type OverviewData } from './pages/Overview';
 import { Skills } from './pages/Skills';
 import { Tools } from './pages/Tools';
 import { Settings } from './pages/Settings';
 import { type RouteName } from './lib/routes';
 import {
+  checkCliAvailable,
   listResources,
   subscribeResource,
   type ResourceView,
@@ -39,10 +40,13 @@ function renderPage(
   route: RouteName,
   recentProjectCount: number,
   currentProject: string | null,
+  overviewData: OverviewData,
+  onNavigate: (route: RouteName) => void,
+  onRetry: () => void,
 ): React.ReactElement {
   switch (route) {
     case 'dashboard':
-      return <Dashboard />;
+      return <Overview data={overviewData} onNavigate={onNavigate} onRetry={onRetry} />;
     case 'skills':
       return <Skills recentProjectCount={recentProjectCount} currentProject={currentProject} />;
     case 'skill-detail':
@@ -74,6 +78,13 @@ export function App() {
   const [onboardingBusy, setOnboardingBusy] = useState(false);
   /** 当前项目是否有 project.yaml（供 ProjectSwitcher 显示状态） */
   const [hasProjectConfig, setHasProjectConfig] = useState(false);
+  /** 概览页聚合数据 */
+  const [overviewData, setOverviewData] = useState<OverviewData>({
+    status: 'loading',
+    skills: { subscribedCount: 0, candidateCount: 0, driftCount: 0 },
+    tools: { enabledCount: 0, totalCount: 0, enabledNames: [] },
+    project: { currentName: null, recentCount: 0 },
+  });
 
   /* ---- 启动时加载 GUI 状态 ---- */
   useEffect(() => {
@@ -83,13 +94,44 @@ export function App() {
     })();
   }, []);
 
-  /* ---- 加载全局数据（Sidebar 计数 + Onboarding 判定） ---- */
+  /* ---- 加载全局数据（Sidebar 计数 + 概览数据 + Onboarding 判定） ---- */
   const loadGlobalData = useCallback(async (cwd?: string) => {
+    /** 更新概览页为 loading 态 */
+    setOverviewData((prev) => ({ ...prev, status: 'loading' }));
+
+    /* CLI 健康检查 */
+    try {
+      const available = await checkCliAvailable();
+      if (!available) {
+        setOverviewData((prev) => ({ ...prev, status: 'cli_missing' }));
+        return null;
+      }
+    } catch {
+      setOverviewData((prev) => ({
+        ...prev,
+        status: 'error',
+        errorMessage: 'CLI 健康检查失败',
+      }));
+      return null;
+    }
+
+    /* 拉取 skills 数据 */
     try {
       const result = await listResources('skills', cwd);
-      const subscribedCount = result.resources.filter(
+      const subscribedResources = result.resources.filter(
         (r) => r.subscriptions.length > 0,
-      ).length;
+      );
+      const subscribedCount = subscribedResources.length;
+      const candidateCount = result.resources.length - subscribedCount;
+
+      /* 统计待同步数 */
+      let driftCount = 0;
+      for (const r of subscribedResources) {
+        const hasNonSynced = r.subscriptions.some((sub) =>
+          sub.targets.some((t) => t.status !== 'synced'),
+        );
+        if (hasNonSynced) driftCount++;
+      }
 
       /* target 统计 */
       const allTargetNames = new Set<string>();
@@ -103,6 +145,7 @@ export function App() {
       const enabledCount = result.enabledTargets.length;
       const totalCount = Math.max(allTargetNames.size, enabledCount);
 
+      /* 更新 Sidebar 计数 */
       setCounts({
         skills: subscribedCount,
         tools: `${enabledCount}/${totalCount}`,
@@ -110,8 +153,27 @@ export function App() {
 
       setHasProjectConfig(!!result.projectDir);
 
+      /* 更新概览数据 */
+      setOverviewData((prev) => ({
+        ...prev,
+        status: 'ready',
+        errorMessage: undefined,
+        skills: { subscribedCount, candidateCount, driftCount },
+        tools: {
+          enabledCount,
+          totalCount,
+          enabledNames: result.enabledTargets,
+        },
+      }));
+
       return result;
-    } catch {
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '未知错误';
+      setOverviewData((prev) => ({
+        ...prev,
+        status: 'error',
+        errorMessage: message,
+      }));
       return null;
     }
   }, []);
@@ -120,6 +182,18 @@ export function App() {
   useEffect(() => {
     void loadGlobalData(guiState?.currentProject ?? undefined);
   }, [route, loadGlobalData, guiState?.currentProject]);
+
+  /* 同步 guiState 的项目信息到 overviewData */
+  useEffect(() => {
+    if (!guiState) return;
+    const name = guiState.currentProject
+      ? guiState.currentProject.replace(/\/+$/, '').split('/').pop() || null
+      : null;
+    setOverviewData((prev) => ({
+      ...prev,
+      project: { currentName: name, recentCount: guiState.recentProjects.length },
+    }));
+  }, [guiState?.currentProject, guiState?.recentProjects.length]);
 
   /* ---- 项目切换（全局，所有页面共享） ---- */
   function handleSelectProject(projectDir: string) {
@@ -248,7 +322,14 @@ export function App() {
         </header>
 
         <div className="app-main__content" key={guiState?.currentProject ?? '__none__'}>
-          {renderPage(route, guiState?.recentProjects.length ?? 0, guiState?.currentProject ?? null)}
+          {renderPage(
+            route,
+            guiState?.recentProjects.length ?? 0,
+            guiState?.currentProject ?? null,
+            overviewData,
+            setRoute,
+            () => void loadGlobalData(guiState?.currentProject ?? undefined),
+          )}
         </div>
       </main>
 
