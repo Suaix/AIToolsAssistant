@@ -103,22 +103,20 @@ desktop/
 
 ## 🎨 设计系统集成
 
-**铁律**：`desktop/src/` 下**不写任何 CSS**，所有样式来自项目根的设计系统：
+**样式来源**：
+
+- `tokens.css`：设计系统 Token（多端真相源），通过 Vite alias `@design-system` 引用 `docs/design-system/tokens.css`
+- `components.css`：桌面端组件样式，位于 `desktop/src/styles/components.css`
 
 ```typescript
 // main.tsx
-import '@design-system/tokens.css';
-import '@design-system/components.css';
+import '@design-system/tokens.css';   // 设计令牌（来自 docs/design-system/）
+import './styles/components.css';      // 组件样式（桌面端本地）
 ```
 
-这通过 Vite alias（见 `vite.config.ts`）指向 `../docs/design-system/`。
-
 **好处**：
-- 单一真相源：改设计系统文档即改桌面 App
-- 跟 L6 HTML 原型共用完全相同的 Token 和组件类名
-- 未来 Web / 其它前端也能复用同一套样式
-
-**违反检测**：如果有人尝试在 `src/` 下新建 `.css` 文件，在 code review 阶段应被拒绝。
+- Token 是多端共享的单一真相源
+- 组件样式作为桌面端运行时代码，修改和调试更直接
 
 ---
 

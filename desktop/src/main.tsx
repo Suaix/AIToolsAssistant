@@ -7,12 +7,12 @@ import ReactDOM from 'react-dom/client';
 import { App } from './App';
 
 /*
- * 接入设计系统的样式（单一真相源）
- * 通过 Vite alias 解析到 ../docs/design-system/
- * 这样改设计系统文档，桌面 App 实时更新；不允许在 desktop/src/ 下自写 CSS
+ * 样式引入：
+ * - tokens.css：设计系统 Token（多端真相源，通过 Vite alias 引用）
+ * - components.css：桌面端组件样式（已移入 desktop/src/styles/）
  */
 import '@design-system/tokens.css';
-import '@design-system/components.css';
+import './styles/components.css';
 
 /* 初始化主题（在渲染前执行，避免首帧闪烁） */
 import { initTheme } from './lib/theme';

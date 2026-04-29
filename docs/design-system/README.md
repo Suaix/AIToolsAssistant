@@ -26,8 +26,9 @@
 | **L2** | [`02-design-principles.md`](./02-design-principles.md) | ✅ v1.0 | 设计原则：4 条可判对错的铁律 |
 | **L3** | [`03-information-architecture.md`](./03-information-architecture.md) | ✅ v1.0 | 信息架构：双形态、5 页清单、3 条核心流 |
 | **L4** | [`04-visual-language.md`](./04-visual-language.md) + [`tokens.css`](./tokens.css) | ✅ v1.0 | 视觉语言：Teal 主色、暗色优先、完整 Token |
-| **L5** | [`05-component-spec.md`](./05-component-spec.md) + [`components.css`](./components.css) | ✅ v1.0 | 组件规范：12 个核心组件五段式规范 |
-| **L6** | [`06-gui-prototype/`](./06-gui-prototype/) | ✅ v1.0 | 初版 GUI：5 页原型 + Popover + 组件 Showcase + 同步魔法动效 |
+| **L5** | [`05-component-spec.md`](./05-component-spec.md) | ✅ v1.0 | 组件规范：12 个核心组件五段式规范 |
+| **L5 实现** | `desktop/src/styles/components.css` | ✅ v1.0 | 组件样式（桌面端运行时代码） |
+| ~~L6~~ | ~~06-gui-prototype/~~ | 已删除 | 初版原型已被真实桌面端取代 |
 | **L7** | [`07-review-checklist.md`](./07-review-checklist.md) | ✅ v1.0 | 走查清单：4 大原则分组 + 红灯条款 |
 
 ---
@@ -52,7 +53,7 @@
 **简化版约束**：
 
 1. 颜色/字体/间距/圆角/阴影必须引用 [`tokens.css`](./tokens.css) 的变量
-2. 所有组件必须使用 [`components.css`](./components.css) 里已定义的 class
+2. 所有组件必须使用 `desktop/src/styles/components.css` 里已定义的 class
 3. 生成的产出必须通过 [`07-review-checklist.md`](./07-review-checklist.md) 的检查
 4. 不确定时先问用户，不要自由发挥
 

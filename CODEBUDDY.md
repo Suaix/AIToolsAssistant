@@ -74,8 +74,6 @@ AIToolsAssistant/
 │       ├── 04-visual-language.md       ← L4 视觉语言
 │       ├── tokens.css                  ← L4 CSS 变量（唯一真相源）
 │       ├── 05-component-spec.md        ← L5 组件规范
-│       ├── components.css              ← L5 组件样式（唯一真相源）
-│       ├── 06-gui-prototype/           ← L6 高保真 HTML 原型
 │       └── 07-review-checklist.md      ← L7 走查清单
 └── CODEBUDDY.md                        ← 本文件
 ```
@@ -128,7 +126,7 @@ AIToolsAssistant/
 收到。按设计系统流程执行：
 1. 已阅读 docs/design-system/AI_INSTRUCTIONS.md
 2. 已阅读 05-component-spec.md 的 Button 规范
-3. 参考 06-gui-prototype/pages/settings.html 现有主题切换模式
+3. 参考 desktop/src/pages/Settings.tsx 现有主题切换模式
 
 [然后生成使用 .btn .btn--primary 类名、引用 Token 的代码]
 

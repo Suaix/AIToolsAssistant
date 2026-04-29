@@ -27,7 +27,7 @@ AI 助手遇到不同任务时，按下表决定读哪些文档：
 | **给现有页面加一个小区域** | `03-information-architecture.md` + `05-component-spec.md` | `tokens.css` + `components.css` |
 | **加一个全新页面** | L1 + L2 + L3（信息架构）+ L5 | 整套 Token + 组件 + L7 走查 |
 | **换颜色 / 换字体 / 改间距** | `04-visual-language.md` | **只能改 `tokens.css` 的变量**，不允许散点改 |
-| **加新状态 / 新徽章类型** | `05-component-spec.md` 第 2 节 | 先补 L5 规范再改 `components.css` |
+| **加新状态 / 新徽章类型** | `05-component-spec.md` 第 2 节 | 先补 L5 规范再改 `desktop/src/styles/components.css` |
 | **加动画 / 过渡** | `04-visual-language.md` 第 7 节 | **动画时长 ≤ 400ms**，同步动效 ≤ 640ms 例外 |
 | **加错误提示 / Toast** | `02-design-principles.md` 原则 3 + `05-component-spec.md` Toast | 文案必须"原因 + 操作" |
 | **加 Empty State** | `05-component-spec.md` EmptyState | 必含"图标 + 标题 + 描述 + CTA" |
@@ -104,13 +104,12 @@ box-shadow: var(--shadow-sm);
 2. 读 docs/design-system/05-component-spec.md
    → 确认页面需要的组件全部已有定义
 
-3. 基于 06-gui-prototype/pages/dashboard.html 为模板
+3. 基于 desktop/src/pages/ 中现有页面为模板
    → 复制粘贴、改内容，不要重写结构
 
-4. 引用链路严格遵守：
-   <link rel="stylesheet" href="../../tokens.css">
-   <link rel="stylesheet" href="../../components.css">
-   <script src="../scripts/app.js" defer></script>
+4. 样式引用：
+   - tokens.css 通过 @design-system 别名引入
+   - components.css 通过 ./styles/components.css 引入
 
 5. 写完后按 07-review-checklist.md 自查
 ```
@@ -166,7 +165,7 @@ box-shadow: var(--shadow-sm);
 ```
 [ ] 所有颜色都用了 var(--color-*)
 [ ] 所有间距都是 var(--space-*)
-[ ] 所有组件都是 components.css 里已定义的类
+[ ] 所有组件都是 desktop/src/styles/components.css 里已定义的类
 [ ] 没有行内 style 写颜色（布局类可接受）
 [ ] 文案遵循动词开头 + 无卖萌 Emoji
 [ ] 符合 L2 四条原则
@@ -201,8 +200,7 @@ box-shadow: var(--shadow-sm);
 | L4 | [`04-visual-language.md`](./04-visual-language.md) | 改颜色、字体、间距、动效 |
 | —  | [`tokens.css`](./tokens.css) | 永远用它的变量，不自己写色值 |
 | L5 | [`05-component-spec.md`](./05-component-spec.md) | 用组件前先查它 |
-| —  | [`components.css`](./components.css) | 永远用它的类名，不自创组件 |
-| L6 | [`06-gui-prototype/`](./06-gui-prototype/) | 新页面以此为模板 |
+| —  | `desktop/src/styles/components.css` | 永远用它的类名，不自创组件 |
 | L7 | [`07-review-checklist.md`](./07-review-checklist.md) | 完工后逐条走查 |
 
 ---

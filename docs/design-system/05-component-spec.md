@@ -869,6 +869,6 @@
 
 ## 十七、下一步
 
-- **配套文件**：[`components.css`](./components.css) — 本文所有组件的 CSS 实现
-- **下一层**：`06-gui-prototype/` —— 使用 tokens.css + components.css 拼装出可点击的 5 页原型
+- **配套文件**：`desktop/src/styles/components.css` — 本文所有组件的 CSS 实现
+- **下一层**：`desktop/src/pages/` —— 桌面端真实页面（已取代原 L6 HTML 原型）
 - **上一层**：`04-visual-language.md` —— 本层所有 Token 的来源
