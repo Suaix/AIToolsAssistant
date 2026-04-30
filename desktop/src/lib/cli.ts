@@ -89,6 +89,8 @@ export interface ListEventData {
   resources: ResourceView[];
   /** 已启用目标名列表 */
   enabledTargets: string[];
+  /** 全量目标列表（含禁用的，FEAT-003 新增） */
+  allTargets?: { name: string; enabled: boolean; user_base: string }[];
   /** 当前 cwd 对应的项目路径（仅当 project.yaml 存在时有值） */
   projectDir?: string;
 }
@@ -260,6 +262,8 @@ export interface ResourceListResult {
   resources: ResourceView[];
   /** 已启用目标列表 */
   enabledTargets: string[];
+  /** 全量目标列表（含禁用的） */
+  allTargets: { name: string; enabled: boolean; user_base: string }[];
   /** 当前 cwd 对应的项目路径（仅当 project.yaml 存在时有值） */
   projectDir?: string;
 }
@@ -291,6 +295,7 @@ export async function listResources(type: ResourceType, cwd?: string): Promise<R
   return {
     resources: listEvent?.data.resources ?? [],
     enabledTargets: listEvent?.data.enabledTargets ?? [],
+    allTargets: listEvent?.data.allTargets ?? [],
     projectDir: listEvent?.data.projectDir,
   };
 }
@@ -461,6 +466,56 @@ export async function getCliVersion(): Promise<string | null> {
     return null;
   } catch {
     return null;
+  }
+}
+
+/* ============================================================
+ * Target 管理：add / remove（FEAT-003 新增）
+ * ============================================================ */
+
+/**
+ * 添加工具
+ *
+ * 调用 `aitools target add <name>`
+ *
+ * @param name 工具名（预定义：codebuddy / workbuddy / claude-internal）
+ */
+export async function addTarget(name: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const events = await invokeCli(['target', 'add', name]);
+    const errorEvent = events.find(
+      (e): e is Extract<JsonEvent, { event: 'error' }> => e.event === 'error',
+    );
+    if (errorEvent) {
+      return { success: false, error: errorEvent.data.message };
+    }
+    return { success: true };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { success: false, error: message };
+  }
+}
+
+/**
+ * 移除工具
+ *
+ * 调用 `aitools target remove <name>`
+ *
+ * @param name 工具名
+ */
+export async function removeTarget(name: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const events = await invokeCli(['target', 'remove', name]);
+    const errorEvent = events.find(
+      (e): e is Extract<JsonEvent, { event: 'error' }> => e.event === 'error',
+    );
+    if (errorEvent) {
+      return { success: false, error: errorEvent.data.message };
+    }
+    return { success: true };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { success: false, error: message };
   }
 }
 

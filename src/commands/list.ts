@@ -215,6 +215,7 @@ async function listOneType(
         type,
         resources: views,
         enabledTargets: enabledTargets.map((t) => t.name),
+        allTargets: config.targets.map((t) => ({ name: t.name, enabled: t.enabled, user_base: t.user_base })),
         ...(hasProjectConfig ? { projectDir } : {}),
       },
     });

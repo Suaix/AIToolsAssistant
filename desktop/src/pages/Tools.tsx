@@ -1,12 +1,17 @@
 /**
- * 已连接工具页 · RFC-002 阶段 3
+ * 已连接工具页 · RFC-002 阶段 3 + FEAT-003 增强
  *
  * 展示 config.targets 列表，每个 target 显示：
  * - 名称 + 启用状态开关
  * - 该 target 上的订阅资源数
+ * - 移除按钮（垃圾桶图标，hover 显示）
  *
- * 启用/禁用操作走 `invoke_cli` 调用 `aitools target enable|disable`（RFC-001.1）
- * L2「状态先于功能」：首屏先展示 target 状态，开关是次要动作
+ * FEAT-003 新增：
+ * - 「添加工具」按钮 + AddToolModal
+ * - 行尾垃圾桶按钮 + RemoveConfirmModal
+ *
+ * 启用/禁用操作走 `aitools target enable|disable`
+ * 添加/移除操作走 `aitools target add|remove`
  */
 import { useEffect, useState } from 'react';
 import {
@@ -16,13 +21,19 @@ import {
   RefreshCw,
   ToggleLeft,
   ToggleRight,
+  Plus,
+  Trash2,
 } from 'lucide-react';
 import {
   listResources,
   setTargetEnabled,
+  addTarget,
+  removeTarget,
   type ResourceListResult,
   CliError,
 } from '../lib/cli';
+import { AddToolModal, AVAILABLE_TOOLS } from '../components/AddToolModal';
+import { RemoveConfirmModal } from '../components/RemoveConfirmModal';
 
 /** 页面状态 */
 type PageStatus = 'loading' | 'error' | 'ready';
@@ -40,6 +51,8 @@ interface TargetRow {
 /** target 美化名映射 */
 const DISPLAY_NAME: Record<string, string> = {
   codebuddy: 'CodeBuddy',
+  workbuddy: 'WorkBuddy',
+  'claude-internal': 'Claude Internal',
   'claude-code': 'Claude Code',
   cursor: 'Cursor',
 };
@@ -55,6 +68,17 @@ export function Tools() {
   const [toggling, setToggling] = useState<string | null>(null);
   /** toast */
   const [toast, setToast] = useState<{ text: string; kind: 'success' | 'error' } | null>(null);
+  /** AddToolModal 是否打开 */
+  const [showAddModal, setShowAddModal] = useState(false);
+  /** 正在添加的工具名 */
+  const [addingName, setAddingName] = useState<string | null>(null);
+  /** RemoveConfirmModal 状态 */
+  const [removeTarget_state, setRemoveTargetState] = useState<{
+    open: boolean;
+    name: string;
+    displayName: string;
+    loading: boolean;
+  }>({ open: false, name: '', displayName: '', loading: false });
 
   useEffect(() => {
     void loadData();
@@ -116,6 +140,38 @@ export function Tools() {
     }
   }
 
+  /**
+   * 添加工具（FEAT-003）
+   */
+  async function handleAdd(name: string) {
+    setAddingName(name);
+    const result = await addTarget(name);
+    if (result.success) {
+      setToast({ text: `${displayName(name)} 已添加`, kind: 'success' });
+      setShowAddModal(false);
+      await loadData();
+    } else {
+      setToast({ text: result.error || '添加失败', kind: 'error' });
+    }
+    setAddingName(null);
+  }
+
+  /**
+   * 移除工具确认（FEAT-003）
+   */
+  async function handleRemoveConfirm() {
+    setRemoveTargetState((prev) => ({ ...prev, loading: true }));
+    const result = await removeTarget(removeTarget_state.name);
+    if (result.success) {
+      setToast({ text: `${removeTarget_state.displayName} 已移除`, kind: 'success' });
+      setRemoveTargetState({ open: false, name: '', displayName: '', loading: false });
+      await loadData();
+    } else {
+      setToast({ text: result.error || '移除失败', kind: 'error' });
+      setRemoveTargetState((prev) => ({ ...prev, loading: false }));
+    }
+  }
+
   /* ---- 加载中 ---- */
   if (status === 'loading') {
     return (
@@ -154,12 +210,33 @@ export function Tools() {
   /* ---- 空态 ---- */
   if (targets.length === 0) {
     return (
-      <div className="empty-state">
-        <Link2 className="empty-state__icon" size={64} aria-hidden="true" />
-        <h3 className="empty-state__title">没有已配置的工具</h3>
-        <p className="empty-state__desc">
-          运行 aitools init 配置你的 AI 工具。
-        </p>
+      <div>
+        <div className="empty-state">
+          <Link2 className="empty-state__icon" size={64} aria-hidden="true" />
+          <h3 className="empty-state__title">没有已配置的工具</h3>
+          <p className="empty-state__desc">
+            点击下方按钮添加你的 AI 工具。
+          </p>
+          <button
+            type="button"
+            className="btn btn--primary"
+            style={{ marginTop: 'var(--space-4)' }}
+            onClick={() => setShowAddModal(true)}
+          >
+            <Plus size={16} style={{ marginRight: '4px' }} />
+            添加工具
+          </button>
+        </div>
+
+        {/* AddToolModal */}
+        {showAddModal && (
+          <AddToolModal
+            existingNames={targets.map((t) => t.name)}
+            onAdd={(name) => void handleAdd(name)}
+            onClose={() => setShowAddModal(false)}
+            addingName={addingName}
+          />
+        )}
       </div>
     );
   }
@@ -187,14 +264,25 @@ export function Tools() {
         >
           {enabledCount}/{targets.length} 个已启用
         </p>
-        <button
-          type="button"
-          className="btn btn--ghost btn--icon"
-          aria-label="刷新"
-          onClick={() => void loadData()}
-        >
-          <RefreshCw size={18} aria-hidden="true" />
-        </button>
+        <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
+          <button
+            type="button"
+            className="btn btn--primary btn--sm"
+            onClick={() => setShowAddModal(true)}
+            disabled={AVAILABLE_TOOLS.every((at) => targets.some((t) => t.name === at.name))}
+          >
+            <Plus size={14} style={{ marginRight: '4px' }} />
+            添加工具
+          </button>
+          <button
+            type="button"
+            className="btn btn--ghost btn--icon"
+            aria-label="刷新"
+            onClick={() => void loadData()}
+          >
+            <RefreshCw size={18} aria-hidden="true" />
+          </button>
+        </div>
       </div>
 
       {/* target 列表 */}
@@ -256,6 +344,34 @@ export function Tools() {
               <span className="badge__dot" />
               {t.enabled ? '启用' : '禁用'}
             </span>
+
+            {/* 移除按钮（hover 显示） */}
+            <button
+              type="button"
+              className="btn btn--ghost btn--icon btn--sm"
+              aria-label={`移除 ${displayName(t.name)}`}
+              style={{
+                opacity: 0,
+                transition: 'opacity var(--duration-fast) var(--easing-standard), color var(--duration-fast)',
+                color: 'var(--color-text-tertiary)',
+              }}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLElement).style.opacity = '1';
+                (e.currentTarget as HTMLElement).style.color = 'var(--color-danger-text)';
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLElement).style.opacity = '0';
+                (e.currentTarget as HTMLElement).style.color = 'var(--color-text-tertiary)';
+              }}
+              onClick={() => setRemoveTargetState({
+                open: true,
+                name: t.name,
+                displayName: displayName(t.name),
+                loading: false,
+              })}
+            >
+              <Trash2 size={16} aria-hidden="true" />
+            </button>
           </article>
         ))}
       </div>
@@ -270,6 +386,26 @@ export function Tools() {
           </div>
         </div>
       )}
+
+      {/* AddToolModal */}
+      {showAddModal && (
+        <AddToolModal
+          existingNames={targets.map((t) => t.name)}
+          onAdd={(name) => void handleAdd(name)}
+          onClose={() => setShowAddModal(false)}
+          addingName={addingName}
+        />
+      )}
+
+      {/* RemoveConfirmModal */}
+      {removeTarget_state.open && (
+        <RemoveConfirmModal
+          toolDisplayName={removeTarget_state.displayName}
+          onConfirm={() => void handleRemoveConfirm()}
+          onCancel={() => setRemoveTargetState({ open: false, name: '', displayName: '', loading: false })}
+          loading={removeTarget_state.loading}
+        />
+      )}
     </div>
   );
 }
@@ -281,20 +417,23 @@ export function Tools() {
 /**
  * 从 list 结果构建 TargetRow 数组
  *
- * enabledTargets 只包含已启用的 target 名，要获取所有 target（含禁用的）
- * 需要从 resources 的 subscriptions[].targets[] 中汇总所有出现过的 target 名
- * 再和 enabledTargets 做交叉比对
+ * FEAT-003 修复：使用 allTargets（含禁用的）构建完整列表，
+ * 而非仅依赖 enabledTargets。
  */
 function buildTargetRows(result: ResourceListResult): TargetRow[] {
   const enabledSet = new Set(result.enabledTargets);
 
-  /* 汇总所有 target 名（包括禁用的不会出现在 enabledTargets 中，
-     但可能在用户期望中存在；这里从 enabledTargets 入手作为已知 target 列表） */
+  /* 从 allTargets 初始化所有 target（含禁用的） */
   const targetSubCounts = new Map<string, number>();
-
-  /* 初始化所有已知 target */
-  for (const name of result.enabledTargets) {
-    targetSubCounts.set(name, 0);
+  if (result.allTargets && result.allTargets.length > 0) {
+    for (const t of result.allTargets) {
+      targetSubCounts.set(t.name, 0);
+    }
+  } else {
+    /* 降级：如果 CLI 版本不支持 allTargets，仍用 enabledTargets */
+    for (const name of result.enabledTargets) {
+      targetSubCounts.set(name, 0);
+    }
   }
 
   /* 遍历资源的订阅统计每个 target 的订阅数 */

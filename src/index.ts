@@ -15,6 +15,8 @@ import { unsubscribeCommand } from './commands/unsubscribe.js';
 import {
   targetEnableCommand,
   targetDisableCommand,
+  targetAddCommand,
+  targetRemoveCommand,
 } from './commands/target.js';
 import { configCommand } from './commands/config.js';
 import { setReporterMode } from './utils/reporter.js';
@@ -148,6 +150,18 @@ targetCmd
   .description('禁用指定 target（使其退出 sync；不删除已同步的目录）')
   .argument('<name>', 'target 名称（如 codebuddy、claude-code）')
   .action(targetDisableCommand);
+
+targetCmd
+  .command('add')
+  .description('新增一个 target 工具（预定义列表：codebuddy、workbuddy、claude-internal）')
+  .argument('<name>', '工具名称')
+  .action(targetAddCommand);
+
+targetCmd
+  .command('remove')
+  .description('移除一个 target 工具（不清理已同步文件）')
+  .argument('<name>', '工具名称')
+  .action(targetRemoveCommand);
 
 /**
  * 注册 config 命令（FEAT-002 新增）

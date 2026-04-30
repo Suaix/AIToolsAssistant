@@ -109,3 +109,110 @@ export async function targetEnableCommand(name: string): Promise<void> {
 export async function targetDisableCommand(name: string): Promise<void> {
   await setTargetEnabled(name, false);
 }
+
+/* ============================================================
+ * 预定义工具列表（FEAT-003 新增）
+ * ============================================================ */
+
+/** 预定义支持的工具及其 user_base 目录 */
+const AVAILABLE_TOOLS: { name: string; user_base: string }[] = [
+  { name: 'codebuddy', user_base: '~/.codebuddy' },
+  { name: 'workbuddy', user_base: '~/.workbuddy' },
+  { name: 'claude-internal', user_base: '~/.claude-internal' },
+];
+
+/* ============================================================
+ * target add 命令（FEAT-003 新增）
+ * ============================================================ */
+
+/**
+ * `aitools target add <name>` 命令入口
+ *
+ * 从预定义列表中查找工具并追加到 config.targets。
+ * 默认 enabled: true。幂等：已存在则跳过。
+ *
+ * @param name 工具名（如 'codebuddy'、'workbuddy'、'claude-internal'）
+ */
+export async function targetAddCommand(name: string): Promise<void> {
+  /* 校验 name 是否在预定义列表中 */
+  const toolDef = AVAILABLE_TOOLS.find((t) => t.name === name);
+  if (!toolDef) {
+    const available = AVAILABLE_TOOLS.map((t) => t.name).join(', ');
+    reporter.error(`未知的工具: ${name}`);
+    reporter.info(`   可用工具: ${available}`);
+    if (isJsonMode()) emitJson({ event: 'done', data: { exitCode: 1 } });
+    return;
+  }
+
+  /* 读配置 */
+  const config = await loadConfig();
+  if (!config) {
+    if (isJsonMode()) emitJson({ event: 'done', data: { exitCode: 1 } });
+    return;
+  }
+
+  /* 幂等：已存在则跳过 */
+  const existing = config.targets.find((t) => t.name === name);
+  if (existing) {
+    reporter.info(`target "${name}" 已存在（无变更）`);
+    if (isJsonMode()) {
+      emitJson({ event: 'target.added', data: { name, user_base: existing.user_base, changed: false } });
+      emitJson({ event: 'done', data: { exitCode: 0 } });
+    }
+    return;
+  }
+
+  /* 追加新 target */
+  config.targets.push({
+    name: toolDef.name,
+    enabled: true,
+    user_base: toolDef.user_base,
+  });
+  await saveConfig(config);
+
+  reporter.success(`target "${name}" 已添加（已启用）`);
+  if (isJsonMode()) {
+    emitJson({ event: 'target.added', data: { name, user_base: toolDef.user_base, changed: true } });
+    emitJson({ event: 'done', data: { exitCode: 0 } });
+  }
+}
+
+/* ============================================================
+ * target remove 命令（FEAT-003 新增）
+ * ============================================================ */
+
+/**
+ * `aitools target remove <name>` 命令入口
+ *
+ * 从 config.targets 中删除匹配的 target。不清理已同步文件。
+ *
+ * @param name 工具名
+ */
+export async function targetRemoveCommand(name: string): Promise<void> {
+  /* 读配置 */
+  const config = await loadConfig();
+  if (!config) {
+    if (isJsonMode()) emitJson({ event: 'done', data: { exitCode: 1 } });
+    return;
+  }
+
+  /* 查找 target */
+  const index = config.targets.findIndex((t) => t.name === name);
+  if (index === -1) {
+    const available = config.targets.map((t) => t.name).join(', ');
+    reporter.error(`未找到 target: ${name}`);
+    reporter.info(`   当前 targets: ${available}`);
+    if (isJsonMode()) emitJson({ event: 'done', data: { exitCode: 1 } });
+    return;
+  }
+
+  /* 移除 */
+  config.targets.splice(index, 1);
+  await saveConfig(config);
+
+  reporter.success(`target "${name}" 已移除`);
+  if (isJsonMode()) {
+    emitJson({ event: 'target.removed', data: { name } });
+    emitJson({ event: 'done', data: { exitCode: 0 } });
+  }
+}
