@@ -9,11 +9,12 @@
  *
  * 遵循 L5 组件规范
  */
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { Sidebar, type SidebarCounts } from './components/Sidebar';
 import { ThemeToggle } from './components/ThemeToggle';
 import { ProjectSwitcher } from './components/ProjectSwitcher';
 import { OnboardingWizard } from './components/OnboardingWizard';
+import { InvalidProjectModal } from './components/InvalidProjectModal';
 import { Overview, type OverviewData } from './pages/Overview';
 import { Skills } from './pages/Skills';
 import { Tools } from './pages/Tools';
@@ -32,6 +33,11 @@ import {
   markOnboardingDone,
   type GuiState,
 } from './lib/gui-state';
+import {
+  detectProjectTools,
+  aggregateExpectedDirs,
+  getToolDisplayName,
+} from './lib/tools';
 
 /**
  * 根据路由名返回对应的页面组件
@@ -85,6 +91,21 @@ export function App() {
     tools: { enabledCount: 0, totalCount: 0, enabledNames: [] },
     project: { currentName: null, recentCount: 0 },
   });
+
+  /**
+   * 当前已连接工具列表的缓存 ref（FEAT-004 TD-2）
+   *
+   * 由 loadGlobalData 写入，handleOpenDirectory 添加项目时读取以做合法性校验。
+   * 用 ref 而非 state：避免与 loadGlobalData 形成依赖循环。
+   */
+  const enabledTargetsRef = useRef<string[]>([]);
+
+  /** 校验失败弹窗状态（null=不显示）·FEAT-004 */
+  const [invalidProject, setInvalidProject] = useState<{
+    selectedPath: string;
+    connectedTools: string[];
+    expectedDirs: string[];
+  } | null>(null);
 
   /* ---- 启动时加载 GUI 状态 ---- */
   useEffect(() => {
@@ -144,6 +165,9 @@ export function App() {
       }
       const enabledCount = result.enabledTargets.length;
       const totalCount = Math.max(allTargetNames.size, enabledCount);
+
+      /* FEAT-004：缓存当前已连接工具列表，供 handleOpenDirectory 合法性校验复用 */
+      enabledTargetsRef.current = result.enabledTargets;
 
       /* 更新 Sidebar 计数 */
       setCounts({
@@ -206,13 +230,36 @@ export function App() {
   }
 
   async function handleOpenDirectory() {
+    /** 选中目录后的统一校验+落地入口 */
+    const handlePicked = async (selected: string) => {
+      const connected = enabledTargetsRef.current;
+
+      /* FEAT-004：合法性校验
+       *   · 当用户已连接至少一个工具时，要求选中目录根层级至少存在一个对应标记目录；
+       *   · 当 connected 为空（首次使用、尚未走 onboarding）时，不阻断添加，
+       *     这是 TD-5 的"克制先于全面"决策。
+       */
+      if (connected.length > 0) {
+        const projectTools = await detectProjectTools(selected, connected);
+        if (projectTools.length === 0) {
+          setInvalidProject({
+            selectedPath: selected,
+            connectedTools: connected.map(getToolDisplayName),
+            expectedDirs: aggregateExpectedDirs(connected),
+          });
+          return; // 不写入 recentProjects、不切换 currentProject
+        }
+      }
+      handleSelectProject(selected);
+    };
+
     try {
       const { invoke } = await import('@tauri-apps/api/core');
       const selected = await invoke<string | null>('open_directory_dialog');
-      if (selected) handleSelectProject(selected);
+      if (selected) await handlePicked(selected);
     } catch {
       const dir = window.prompt('输入项目目录路径：');
-      if (dir) handleSelectProject(dir);
+      if (dir) await handlePicked(dir);
     }
   }
 
@@ -341,6 +388,16 @@ export function App() {
           candidates={onboardingData.candidates}
           onConfirm={(names) => void handleOnboardingConfirm(names)}
           onClose={handleOnboardingClose}
+        />
+      )}
+
+      {/* 添加项目失败弹窗（FEAT-004） */}
+      {invalidProject && (
+        <InvalidProjectModal
+          selectedPath={invalidProject.selectedPath}
+          connectedTools={invalidProject.connectedTools}
+          expectedDirs={invalidProject.expectedDirs}
+          onClose={() => setInvalidProject(null)}
         />
       )}
     </div>

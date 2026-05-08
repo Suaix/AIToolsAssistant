@@ -259,6 +259,16 @@ ol {
   background: var(--color-text-tertiary);
 }
 
+/* Disabled（FEAT-004：工具断开后的灰色中性状态，区别于 danger 错误态） */
+.badge--disabled {
+  background: var(--color-bg-muted);
+  color: var(--color-text-tertiary);
+  opacity: 0.7;
+}
+.badge--disabled .badge__dot {
+  background: var(--color-text-disabled, var(--color-text-tertiary));
+}
+
 /* Loading（带脉动） */
 .badge--loading {
   background: var(--color-brand-subtle);

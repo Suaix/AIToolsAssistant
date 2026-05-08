@@ -32,7 +32,8 @@ import {
   type ResourceListResult,
   CliError,
 } from '../lib/cli';
-import { AddToolModal, AVAILABLE_TOOLS } from '../components/AddToolModal';
+import { AddToolModal } from '../components/AddToolModal';
+import { AVAILABLE_TOOLS, getToolDisplayName } from '../lib/tools';
 import { RemoveConfirmModal } from '../components/RemoveConfirmModal';
 
 /** 页面状态 */
@@ -48,14 +49,7 @@ interface TargetRow {
   subCount: number;
 }
 
-/** target 美化名映射 */
-const DISPLAY_NAME: Record<string, string> = {
-  codebuddy: 'CodeBuddy',
-  workbuddy: 'WorkBuddy',
-  'claude-internal': 'Claude Internal',
-  'claude-code': 'Claude Code',
-  cursor: 'Cursor',
-};
+/** target 美化名映射已迁移至 lib/tools.ts 的 TOOL_DISPLAY_NAME（FEAT-004） */
 
 /**
  * 已连接工具页主组件
@@ -467,7 +461,8 @@ function buildTargetRows(result: ResourceListResult): TargetRow[] {
 
 /**
  * target 名美化显示
+ * FEAT-004：复用 lib/tools.ts 的 getToolDisplayName，保持单一映射真相源。
  */
 function displayName(name: string): string {
-  return DISPLAY_NAME[name] ?? name;
+  return getToolDisplayName(name);
 }

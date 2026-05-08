@@ -35,6 +35,7 @@ import {
 } from '../lib/cli';
 import { SyncProgressModal } from '../components/SyncProgressModal';
 import { SubscribePopover } from '../components/SubscribePopover';
+import { detectProjectTools, getToolDisplayName } from '../lib/tools';
 
 /* ============================================================
  * 常量映射
@@ -121,6 +122,14 @@ export function Skills({ recentProjectCount = 0, currentProject }: SkillsProps) 
   /** toast 消息 */
   const [toast, setToast] = useState<{ text: string; kind: 'success' | 'error' } | null>(null);
 
+  /**
+   * 当前项目实际关联的工具集合（FEAT-004）
+   * 由 loadData 后通过 detectProjectTools 动态计算，不持久化（Q-1 决策）。
+   */
+  const [projectTools, setProjectTools] = useState<string[]>([]);
+  /** projectTools 是否正在加载（用于 SubscribePopover 的"检测中..."态） */
+  const [projectToolsLoading, setProjectToolsLoading] = useState(false);
+
   /* 首次挂载加载 */
   useEffect(() => {
     void loadData(currentProject ?? undefined);
@@ -136,6 +145,9 @@ export function Skills({ recentProjectCount = 0, currentProject }: SkillsProps) 
   /**
    * 从 CLI 加载 skills 数据
    * @param projectCwd 可选的项目目录（影响 CLI 的项目级订阅检测）
+   *
+   * FEAT-004：加载完毕后基于 result.projectDir + result.enabledTargets
+   *   动态探测当前项目实际关联的工具集合，写入 projectTools state。
    */
   async function loadData(projectCwd?: string) {
     setStatus('loading');
@@ -143,6 +155,21 @@ export function Skills({ recentProjectCount = 0, currentProject }: SkillsProps) 
       const data = await listResources('skills', projectCwd);
       setResult(data);
       setStatus('ready');
+
+      /* 动态探测项目关联工具集合 */
+      const projectDir = data.projectDir;
+      if (projectDir && data.enabledTargets.length > 0) {
+        setProjectToolsLoading(true);
+        try {
+          const tools = await detectProjectTools(projectDir, data.enabledTargets);
+          setProjectTools(tools);
+        } finally {
+          setProjectToolsLoading(false);
+        }
+      } else {
+        setProjectTools([]);
+        setProjectToolsLoading(false);
+      }
     } catch (err) {
       const message =
         err instanceof CliError
@@ -313,7 +340,7 @@ export function Skills({ recentProjectCount = 0, currentProject }: SkillsProps) 
           type="button"
           className="btn btn--primary"
           style={{ marginTop: 'var(--space-4)' }}
-          onClick={() => void loadData()}
+          onClick={() => void loadData(cliProjectDir ?? currentProject ?? undefined)}
         >
           重试
         </button>
@@ -421,6 +448,7 @@ export function Skills({ recentProjectCount = 0, currentProject }: SkillsProps) 
                 item={item}
                 tab={activeTab}
                 projectDir={cliProjectDir}
+                projectTools={projectTools}
                 onSync={() =>
                   setSyncTask({
                     kind: 'one',
@@ -463,6 +491,8 @@ export function Skills({ recentProjectCount = 0, currentProject }: SkillsProps) 
         <SubscribePopover
           resourceName={pendingSub.displayName}
           hasProject={!!cliProjectDir}
+          projectTools={projectTools}
+          projectToolsLoading={projectToolsLoading}
           onConfirm={(scope, sync) => void handleSubscribe(scope, sync)}
           onCancel={() => setPendingSub(null)}
         />
@@ -488,8 +518,12 @@ export function Skills({ recentProjectCount = 0, currentProject }: SkillsProps) 
         <SyncProgressModal
           args={buildSyncArgs(syncTask)}
           title={buildSyncTitle(syncTask)}
+          /* FEAT-004 BUG-2：项目级同步必须显式传 cwd，否则 CLI fallback 到 $HOME 找不到 .aitools/project.yaml */
+          cwd={cliProjectDir ?? currentProject ?? undefined}
           onClose={() => setSyncTask(null)}
-          onSyncedSomething={() => void loadData()}
+          onSyncedSomething={() =>
+            void loadData(cliProjectDir ?? currentProject ?? undefined)
+          }
         />
       )}
     </div>
@@ -699,6 +733,11 @@ interface SkillCardProps {
   tab: TabName;
   /** 当前项目路径 */
   projectDir: string | null;
+  /**
+   * 当前项目实际关联的工具集合（FEAT-004）
+   *   仅项目级订阅 Tab 用：判定行内 target 是否处于"工具已断开"灰态
+   */
+  projectTools: string[];
   /** 同步回调 */
   onSync: () => void;
   /** 订阅回调（Unused Tab 可见） */
@@ -717,6 +756,7 @@ function SkillCard({
   item,
   tab,
   projectDir,
+  projectTools,
   onSync,
   onSubscribe,
   onUnsubscribe,
@@ -741,6 +781,14 @@ function SkillCard({
   /* 当前视角的 target 状态（Unused Tab 无） */
   const targetStatuses = currentSub?.targets ?? [];
   const hasUnsynced = targetStatuses.some((t) => t.status !== 'synced');
+  /**
+   * FEAT-004：仅项目级订阅有"工具断开"概念。
+   * 是否所有 target 都已断开——若是则隐藏"同步"按钮（无可同步对象）。
+   */
+  const allDisconnected =
+    currentSub?.scope === 'project' &&
+    targetStatuses.length > 0 &&
+    targetStatuses.every((t) => !projectTools.includes(t.target));
 
   /* Unused Tab 下的 scope 推导 */
   const scopeLabel =
@@ -771,17 +819,38 @@ function SkillCard({
       </div>
       <p className="card__desc">{desc}</p>
       <div className="card__footer">
-        {/* 同步状态 badge（User / Project Tab） */}
-        {targetStatuses.map((t) => (
-          <span
-            key={t.target}
-            className={`badge ${STATUS_BADGE_CLASS[t.status]}`}
-            title={t.targetPath}
-          >
-            <span className="badge__dot" />
-            {STATUS_LABEL[t.status]} · {t.target}
-          </span>
-        ))}
+        {/* 同步状态 badge（User / Project Tab）
+         *  FEAT-004：项目级订阅下，若 target 不在 projectTools 中（即工具已被断开），
+         *  渲染为 .badge--disabled 灰态并展示「<displayName> 连接已断开」短提示，
+         *  禁用同步按钮。用户级订阅不受此影响。
+         */}
+        {targetStatuses.map((t) => {
+          const isProjectScope = currentSub?.scope === 'project';
+          const isDisconnected =
+            isProjectScope && !projectTools.includes(t.target);
+          if (isDisconnected) {
+            return (
+              <span
+                key={t.target}
+                className="badge badge--disabled"
+                title={t.targetPath}
+              >
+                <span className="badge__dot" />
+                {getToolDisplayName(t.target)} 连接已断开
+              </span>
+            );
+          }
+          return (
+            <span
+              key={t.target}
+              className={`badge ${STATUS_BADGE_CLASS[t.status]}`}
+              title={t.targetPath}
+            >
+              <span className="badge__dot" />
+              {STATUS_LABEL[t.status]} · {getToolDisplayName(t.target)}
+            </span>
+          );
+        })}
 
         {/* 操作按钮区：靠右对齐 */}
         <span style={{ marginLeft: 'auto', display: 'flex', gap: 'var(--space-2)' }}>
@@ -810,7 +879,7 @@ function SkillCard({
                 <Trash2 size={14} aria-hidden="true" />
                 取消订阅
               </button>
-              {hasUnsynced && (
+              {hasUnsynced && !allDisconnected && (
                 <button
                   type="button"
                   className="btn btn--secondary btn--sm"

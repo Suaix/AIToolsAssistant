@@ -63,6 +63,14 @@ export interface SyncProgressModalProps {
   args: string[];
   /** 弹窗标题（上下文相关，如「同步全部 Skills」或「同步 foo」） */
   title: string;
+  /**
+   * 子进程工作目录（项目记忆 #36043466 + FEAT-004 BUG-2）
+   *
+   * 必须显式传入用户选中的项目路径——任何项目级同步都依赖 CLI 在
+   * 正确 cwd 下读取 `.aitools/project.yaml`。
+   * 用户级同步可不传（CLI 不依赖 project.yaml）。
+   */
+  cwd?: string;
   /** 关闭回调（用户点击「完成/关闭」后触发；running 期间不会触发） */
   onClose: () => void;
   /** 关闭前的副作用回调（用于让外部刷新列表）；仅在至少有一次 created/updated 时触发 */
@@ -75,6 +83,7 @@ export interface SyncProgressModalProps {
 export function SyncProgressModal({
   args,
   title,
+  cwd,
   onClose,
   onSyncedSomething,
 }: SyncProgressModalProps) {
@@ -98,16 +107,20 @@ export function SyncProgressModal({
 
     void (async () => {
       try {
-        const controller = await runSyncStream(args, {
-          onEvent: (event: JsonEvent) => {
-            if (cancelled) return;
-            handleEvent(event);
+        const controller = await runSyncStream(
+          args,
+          {
+            onEvent: (event: JsonEvent) => {
+              if (cancelled) return;
+              handleEvent(event);
+            },
+            onDone: (result) => {
+              if (cancelled) return;
+              handleDone(result);
+            },
           },
-          onDone: (result) => {
-            if (cancelled) return;
-            handleDone(result);
-          },
-        });
+          cwd,
+        );
         unlistenRef.current = controller.unlisten;
       } catch (err) {
         if (cancelled) return;

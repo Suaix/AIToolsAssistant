@@ -2,3 +2,7 @@
 # will have compiled files and executables
 /target/
 /gen/schemas
+
+# FEAT-004 BUG-1：禁止 src-tauri 下出现 .aitools/，
+# 否则会被 CLI 在 Tauri 进程默认 cwd 下误读为"当前项目"
+.aitools/

@@ -1,0 +1,128 @@
+# === 基础信息 ===
+id: "FEAT-004"
+title: "优化连接工具与 Skill 订阅关联关系"
+type: "FEAT"
+created: "2026-05-08"
+updated: "2026-05-08"
+
+# === 状态 ===
+status: "ARCHIVED"
+sub_status: null
+
+# === 阶段详情 ===
+phases:
+  analysis:
+    status: "completed"
+    started: "2026-05-08"
+    completed: "2026-05-08"
+    output: "01-requirements.md"
+  design:
+    status: "completed"
+    started: "2026-05-08"
+    completed: "2026-05-08"
+    output: "02-design.md"
+  technical:
+    status: "completed"
+    started: "2026-05-08"
+    completed: "2026-05-08"
+    output: "03-technical.md"
+  coding:
+    status: "completed"
+    started: "2026-05-08"
+    completed: "2026-05-08"
+    output: "04-coding-log.md"
+  testing:
+    status: "completed"
+    started: "2026-05-08"
+    completed: "2026-05-08"
+    output: "05-testing.md"
+
+# === 门禁 ===
+gates:
+  analysis_to_design:
+    checklist:
+      - "需求范围明确"
+      - "验收标准（AC）已定义"
+      - "用户故事完整"
+    passed:
+      - "需求范围明确"
+      - "验收标准（AC）已定义"
+      - "用户故事完整"
+    skipped: []
+
+  design_to_technical:
+    checklist:
+      - "页面流程完整"
+      - "组件规范引用"
+      - "交互状态覆盖（空态/加载/错误/成功）"
+    passed:
+      - "页面流程完整"
+      - "组件规范引用"
+      - "交互状态覆盖（空态/加载/错误/成功）"
+    skipped: []
+
+  technical_to_coding:
+    checklist:
+      - "架构设计完整"
+      - "接口定义明确"
+      - "影响范围已评估"
+    passed:
+      - "架构设计完整"
+      - "接口定义明确"
+      - "影响范围已评估"
+    skipped: []
+
+  coding_to_testing:
+    checklist:
+      - "自测通过"
+      - "代码已提交"
+      - "编码日志已更新"
+    passed:
+      - "自测通过"
+      - "编码日志已更新"
+    skipped:
+      - item: "代码已提交"
+        reason: "按用户规则『非明确要求不主动 commit』，本任务保持工作区 staged 状态，由用户在验收后统一提交"
+        date: "2026-05-08"
+
+  testing_to_archived:
+    checklist:
+      - "功能验收通过"
+      - "UI 走查通过"
+      - "文档归档完成"
+    passed:
+      - "功能验收通过"
+      - "UI 走查通过"
+      - "文档归档完成"
+    skipped: []
+
+# === AI 上下文恢复 ===
+context:
+  last_action: "ARCHIVED · M-1~M-12 全部 ✅、UI 走查通过、Retro 已写入；任务从 tasks/ 移至 archived/，提醒新建 FEAT-005（claude 命名统一）与 FEAT-006（cwd 注入层）"
+  next_action: "无（任务已归档）"
+  blockers: []
+  decisions:
+    - date: "2026-05-08"
+      decision: "三类问题合并为同一任务推进"
+      reason: "三者均围绕「项目目录与已连接工具的绑定关系」这一同源逻辑，拆分会导致重复设计"
+    - date: "2026-05-08"
+      decision: "「项目关联工具集合」采用动态扫描，不持久化"
+      reason: "关联关系一般不变；即使变化也应根据最新连接工具列表重新识别，避免脏数据"
+    - date: "2026-05-08"
+      decision: "目录合法性校验仅识别所选目录的根层级"
+      reason: "符合 L2「明确先于惊喜」，避免递归扫描带来的歧义"
+    - date: "2026-05-08"
+      decision: "工具被断开时，已有订阅与文件保留不动；Skills 面板对应行追加短提示『XXX 连接已断开』"
+      reason: "保护用户既有工作成果，同时通过状态可见性传达真实情况（L2 状态先于功能）"
+    - date: "2026-05-08"
+      decision: "项目关联工具为空时，「项目级订阅」按钮禁用 + tooltip"
+      reason: "保持入口可见性，便于用户认知功能存在但当前不可用"
+    - date: "2026-05-08"
+      decision: "添加项目校验失败弹窗不提供「跳转连接工具」引导"
+      reason: "用户明确要求；保持弹窗动作单一，避免误导路径"
+    - date: "2026-05-08"
+      decision: "claude-code / claude-internal 命名统一拆出独立任务 FEAT-005"
+      reason: "现状跨 src/ 默认 config、index.ts 帮助、commands/list.ts、tests/** 等 8+ 文件，且需要旧 config 迁移逻辑；本任务采用双名兼容映射保持只读，避免范围蔓延"
+    - date: "2026-05-08"
+      decision: "cwd 传递架构重构（方案 C+C-2：cli.ts 增加 activeProjectCwd 注入层）拆出独立任务 FEAT-006"
+      reason: "BUG-1/BUG-2 暴露了"现取现传"模式的可维护性短板，但完整方案需要改 5 个 CLI 函数 + App.tsx 多处 + 重新审视所有调用点；本任务已通过显式补传完成局部修复，架构层重构留独立任务做更稳妥"

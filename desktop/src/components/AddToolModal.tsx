@@ -3,25 +3,16 @@
  *
  * 展示预定义工具列表（排除已存在的），点选即添加。
  * 遵循 L5 · 复用 .modal + .card
+ *
+ * FEAT-004：AVAILABLE_TOOLS / ToolDefinition 已迁移至 ../lib/tools；
+ *   本文件保留 re-export 以兼容历史导入路径，新代码请直接 import 自 ../lib/tools。
  */
 import { Loader2 } from 'lucide-react';
+import { AVAILABLE_TOOLS, type ToolDefinition } from '../lib/tools';
 
-/** 预定义工具信息 */
-export interface ToolDefinition {
-  /** 工具唯一标识 */
-  name: string;
-  /** 显示名 */
-  displayName: string;
-  /** 用户级目录 */
-  userBase: string;
-}
-
-/** 预定义支持的工具列表 */
-export const AVAILABLE_TOOLS: ToolDefinition[] = [
-  { name: 'codebuddy', displayName: 'CodeBuddy', userBase: '~/.codebuddy' },
-  { name: 'workbuddy', displayName: 'WorkBuddy', userBase: '~/.workbuddy' },
-  { name: 'claude-internal', displayName: 'Claude Internal', userBase: '~/.claude-internal' },
-];
+/* 兼容旧导入：保留 re-export */
+export { AVAILABLE_TOOLS };
+export type { ToolDefinition };
 
 /**
  * AddToolModal 组件属性

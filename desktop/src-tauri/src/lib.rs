@@ -50,6 +50,21 @@ fn validate_args(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// 中性兜底工作目录（FEAT-004 BUG-1）
+///
+/// 当 invoke_cli / invoke_cli_stream 未被显式传入 cwd 时，
+/// 必须把子进程 cwd 切到一个**保证不含 .aitools/project.yaml** 的目录，
+/// 否则 CLI 内 `process.cwd()` 会 fallback 到 Tauri 进程的 cwd
+/// （开发态为 desktop/src-tauri/，生产态为 .app/Contents/MacOS/），
+/// 一旦该路径恰好存在 `.aitools/project.yaml`（如本仓库 src-tauri 历史遗留），
+/// CLI 会将其误读为"当前项目"，导致 GUI 显示错误的项目级订阅。
+///
+/// 选 $HOME：稳定存在、用户家目录通常不直接放 .aitools/project.yaml；
+/// 取不到时退回 "/"（绝对中性）。
+fn neutral_cwd() -> String {
+    std::env::var("HOME").unwrap_or_else(|_| "/".to_string())
+}
+
 /// Tauri command：同步（阻塞）调用 aitools CLI
 ///
 /// ### macOS PATH 坑位
@@ -72,10 +87,13 @@ fn invoke_cli(args: Vec<String>, cwd: Option<String>) -> Result<CliResult, Strin
     /* 用登录 shell 执行，确保 PATH 完整（nvm/pnpm/volta 等） */
     let mut cmd = Command::new("sh");
     cmd.arg("-lc").arg(&full_cmd);
-    /* 若提供 cwd，则设置子进程工作目录（影响 CLI 的 process.cwd()） */
-    if let Some(ref dir) = cwd {
-        cmd.current_dir(dir);
-    }
+    /* 工作目录策略（FEAT-004 BUG-1）：
+     *   · 显式传 cwd：使用之，影响 CLI 的 process.cwd()
+     *   · 未传 cwd：强制兜底到中性目录（$HOME），
+     *     避免 fallback 到 Tauri 进程的 cwd（src-tauri/）误读它的 .aitools/project.yaml
+     */
+    let effective_cwd = cwd.clone().unwrap_or_else(neutral_cwd);
+    cmd.current_dir(&effective_cwd);
     let output = cmd
         .output()
         .map_err(|e| format!("启动 shell 失败: {}", e))?;
@@ -169,9 +187,9 @@ fn invoke_cli_stream(
         .arg(&full_cmd)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    if let Some(ref dir) = cwd {
-        cmd.current_dir(dir);
-    }
+    /* FEAT-004 BUG-1：未传 cwd 时强制兜底到中性目录，避免误读 src-tauri/.aitools */
+    let effective_cwd = cwd.clone().unwrap_or_else(neutral_cwd);
+    cmd.current_dir(&effective_cwd);
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("启动 shell 失败: {}", e))?;
@@ -299,6 +317,40 @@ fn open_directory_dialog() -> Result<Option<String>, String> {
     Ok(Some(path))
 }
 
+/// Tauri command：探测项目根目录下哪些候选标记目录存在
+///
+/// 设计目标（FEAT-004）：
+///   GUI 需要根据"项目根目录是否包含 .codebuddy / .claude-internal 等"
+///   动态计算"项目关联工具集合"。本命令保持纯 fs 探测，
+///   不引入工具名 ↔ 目录名映射，让映射只存在于 TS 一侧（lib/tools.ts），
+///   未来增加新工具时 Rust 端无需修改。
+///
+/// 入参：
+///   project_dir    项目绝对路径
+///   candidate_dirs 候选目录名列表（已带 . 前缀，如 [".codebuddy", ".claude-internal"]）
+///
+/// 返回：
+///   Ok(Vec<String>)  实际存在的目录名（保持入参顺序，自动去重）
+///   Err(String)      project_dir 不存在或不是目录
+#[tauri::command]
+fn detect_project_tools(
+    project_dir: String,
+    candidate_dirs: Vec<String>,
+) -> Result<Vec<String>, String> {
+    let root = std::path::Path::new(&project_dir);
+    if !root.is_dir() {
+        return Err(format!("项目目录不存在或不是目录: {}", project_dir));
+    }
+    let mut found: Vec<String> = Vec::new();
+    for name in candidate_dirs {
+        let p = root.join(&name);
+        if p.is_dir() && !found.contains(&name) {
+            found.push(name);
+        }
+    }
+    Ok(found)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -318,7 +370,8 @@ pub fn run() {
             check_cli_available,
             invoke_cli_stream,
             open_directory_dialog,
-            ensure_project_config
+            ensure_project_config,
+            detect_project_tools
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
