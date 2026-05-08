@@ -98,7 +98,7 @@ export function Sidebar({ active, onNavigate, counts }: SidebarProps) {
         <span className="sidebar__logo" aria-hidden="true">
           A
         </span>
-        <span className="sidebar__name">aitools</span>
+        <span className="sidebar__name">AIToolsAssistant</span>
       </div>
 
       {/* 第一组：状态总览 */}

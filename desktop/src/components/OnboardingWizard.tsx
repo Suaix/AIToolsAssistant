@@ -49,7 +49,7 @@ export function OnboardingWizard({
       <div className="modal-overlay" role="dialog" aria-modal="true">
         <div className="modal">
           <header className="modal__header">
-            <h2 className="modal__title">欢迎使用 aitools</h2>
+            <h2 className="modal__title">欢迎使用 AIToolsAssistant</h2>
             <button
               type="button"
               className="btn btn--ghost btn--icon btn--sm"

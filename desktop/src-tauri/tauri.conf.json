@@ -1,6 +1,6 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "aitools",
+  "productName": "AIToolsAssistant",
   "version": "0.1.0",
   "identifier": "com.aitools.desktop",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "aitools",
+        "title": "AIToolsAssistant",
         "label": "main",
         "width": 960,
         "height": 720,
