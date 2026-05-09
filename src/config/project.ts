@@ -8,6 +8,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { logger } from '../utils/logger.js';
+import { CURRENT_PROJECT_CONFIG_VERSION } from './version.js';
+import { migrateProjectConfigDispatch } from './migrations/index.js';
 import type { ProjectConfig, ResourceType } from '../types/index.js';
 
 /** 项目配置目录名 */
@@ -63,7 +65,13 @@ function normalizeStringArray(value: unknown): string[] {
 
 /**
  * 加载项目配置文件
- * 按资源类型分组读取 skills/commands/agents/rules 列表
+ *
+ * 流程（FEAT-005）：read → migrate → validate → normalize
+ *   1. 读取 yaml 文件，解析为对象
+ *   2. 调用迁移调度器（migrateProjectConfigDispatch）：检测 version、备份、按需应用迁移
+ *   3. 校验基本结构合法性
+ *   4. 规范化字段
+ *
  * @param projectDir 项目根目录的绝对路径
  * @returns 项目配置对象，不存在或格式错误时返回 null
  */
@@ -72,58 +80,73 @@ export async function loadProjectConfig(
 ): Promise<ProjectConfig | null> {
   const configPath = getProjectConfigPath(projectDir);
 
+  let parsed: unknown;
   try {
     const content = await fs.readFile(configPath, 'utf-8');
-    const parsed = parseYaml(content);
-
-    /* 校验基本结构 */
-    if (!parsed || typeof parsed !== 'object') {
-      logger.warn('项目配置文件格式错误');
-      return null;
-    }
-
-    const obj = parsed as Record<string, unknown>;
-
-    /* 校验配置中至少包含一个预期字段（skills/commands/agents/rules），否则视为无效 */
-    const hasAnyKnownField =
-      'skills' in obj ||
-      'commands' in obj ||
-      'agents' in obj ||
-      'rules' in obj;
-    if (!hasAnyKnownField) {
-      logger.warn('项目配置文件中未找到任何已知资源字段');
-      return null;
-    }
-
-    /* 按资源类型分组读取，缺失字段返回空数组 */
-    const result: ProjectConfig = {
-      skills: normalizeStringArray(obj.skills),
-    };
-
-    /* 可选字段仅在存在时才写入 */
-    const commands = normalizeStringArray(obj.commands);
-    if (commands.length > 0) {
-      result.commands = commands;
-    }
-    const agents = normalizeStringArray(obj.agents);
-    if (agents.length > 0) {
-      result.agents = agents;
-    }
-    const rules = normalizeStringArray(obj.rules);
-    if (rules.length > 0) {
-      result.rules = rules;
-    }
-
-    return result;
+    parsed = parseYaml(content);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       /* 文件不存在，返回 null（正常情况，非错误） */
       return null;
     }
-
     logger.warn('项目配置文件格式错误');
     return null;
   }
+
+  /* 校验基本结构 */
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    logger.warn('项目配置文件格式错误');
+    return null;
+  }
+
+  const obj = parsed as Record<string, unknown>;
+
+  /* 校验配置中至少包含一个预期字段（skills/commands/agents/rules），否则视为无效 */
+  const hasAnyKnownField =
+    'skills' in obj ||
+    'commands' in obj ||
+    'agents' in obj ||
+    'rules' in obj;
+  if (!hasAnyKnownField) {
+    logger.warn('项目配置文件中未找到任何已知资源字段');
+    return null;
+  }
+
+  /* 迁移管线：read → migrate → save */
+  let migrated: Record<string, unknown>;
+  try {
+    const dispatchResult = await migrateProjectConfigDispatch(obj, configPath);
+    migrated = dispatchResult.config;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error(`项目配置迁移失败: ${message}`);
+    return null;
+  }
+
+  /* 按资源类型分组读取，缺失字段返回空数组（FEAT-005：补 version） */
+  const result: ProjectConfig = {
+    version:
+      typeof migrated.version === 'number'
+        ? migrated.version
+        : CURRENT_PROJECT_CONFIG_VERSION,
+    skills: normalizeStringArray(migrated.skills),
+  };
+
+  /* 可选字段仅在存在时才写入 */
+  const commands = normalizeStringArray(migrated.commands);
+  if (commands.length > 0) {
+    result.commands = commands;
+  }
+  const agents = normalizeStringArray(migrated.agents);
+  if (agents.length > 0) {
+    result.agents = agents;
+  }
+  const rules = normalizeStringArray(migrated.rules);
+  if (rules.length > 0) {
+    result.rules = rules;
+  }
+
+  return result;
 }
 
 /**
@@ -143,7 +166,8 @@ export async function saveProjectConfig(
   await fs.mkdir(configDir, { recursive: true });
 
   /* 仅序列化非空字段，避免 project.yaml 中出现不必要的空数组 */
-  const payload: Record<string, string[]> = {
+  const payload: Record<string, unknown> = {
+    version: config.version ?? CURRENT_PROJECT_CONFIG_VERSION,
     skills: config.skills ?? [],
   };
   if (config.commands && config.commands.length > 0) {
@@ -200,7 +224,10 @@ export async function addResourceToProject(
   resourceName: string,
 ): Promise<void> {
   /* 尝试加载现有配置 */
-  const existing = (await loadProjectConfig(projectDir)) ?? { skills: [] };
+  const existing = (await loadProjectConfig(projectDir)) ?? {
+    version: CURRENT_PROJECT_CONFIG_VERSION,
+    skills: [],
+  };
 
   /* 读取现有同类型列表 */
   const list = getProjectResourceList(existing, type);

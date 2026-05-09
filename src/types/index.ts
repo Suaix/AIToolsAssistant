@@ -196,8 +196,18 @@ export interface SyncOptions {
 /**
  * 全局配置文件结构
  * 对应 ~/.aitools/config.yaml 的完整结构
+ *
+ * FEAT-005：新增 version 字段，用于 schema 版本感知的迁移管线。
  */
 export interface Config {
+  /**
+   * Schema 版本号（FEAT-005 新增）
+   *
+   * 用途：loadConfig 在 yaml 解析后通过本字段决定是否触发迁移。
+   * 缺失时迁移调度器视为旧版（< CURRENT_CONFIG_VERSION），逐版本应用迁移函数。
+   * 当前版本号常量见 src/config/version.ts。
+   */
+  version: number;
   /** 资源源目录路径（用户初始化时指定，默认 ~/.aitools/） */
   source: string;
   /** 同步目标工具列表 */
@@ -233,12 +243,17 @@ export type SkillSyncStatus = 'synced' | 'changed' | 'not_synced';
 
 /**
  * 单个资源对单个目标的同步结果
+ *
+ * FEAT-005：新增 'skipped_missing_tool' action，用于"AI 工具家目录不存在"场景
+ * （US-6 边界守卫：aitools 不主动 mkdir AI 工具家目录）
  */
 export interface SkillTargetSyncResult {
   /** 目标工具名称 */
   targetName: string;
-  /** 同步动作：created-新增、updated-更新、skipped-跳过 */
-  action: 'created' | 'updated' | 'skipped';
+  /** 同步动作 */
+  action: 'created' | 'updated' | 'skipped' | 'skipped_missing_tool';
+  /** action === 'skipped_missing_tool' 时携带预期路径（用于提示用户） */
+  expectedPath?: string;
 }
 
 /**
@@ -253,6 +268,8 @@ export interface SkillSyncResult {
 
 /**
  * 完整同步操作的结果摘要
+ *
+ * FEAT-005：新增 skippedMissingTool 计数，区分"内容已最新"与"工具未安装"两种 skip
  */
 export interface SyncSummary {
   /** 总资源数量 */
@@ -263,6 +280,8 @@ export interface SyncSummary {
   updated: number;
   /** 跳过数量（无变更） */
   skipped: number;
+  /** 跳过数量（AI 工具未安装；US-6 边界守卫触发） */
+  skippedMissingTool: number;
   /** 各资源的详细同步结果 */
   results: SkillSyncResult[];
 }
@@ -395,8 +414,12 @@ export interface SyncProgressData {
   target: string;
   /** 订阅落点 */
   location: SyncLocationData;
-  /** 动作：created / updated / skipped / failed */
-  action: 'created' | 'updated' | 'skipped' | 'failed';
+  /**
+   * 动作：created / updated / skipped / skipped_missing_tool / failed
+   *
+   * FEAT-005：新增 'skipped_missing_tool'，表示因 AI 工具家目录不存在而跳过
+   */
+  action: 'created' | 'updated' | 'skipped' | 'skipped_missing_tool' | 'failed';
   /** 当前进度（1-based） */
   index: number;
   /** 总任务数 */
@@ -480,8 +503,17 @@ export type SyncProgressCallback = (event: SyncProgressData) => void;
  * 项目级配置文件结构
  * 对应 .aitools/project.yaml
  * 按资源类型分组记录当前项目已关联的资源名称列表
+ *
+ * FEAT-005：新增 version 字段，用于 schema 版本感知的迁移管线。
  */
 export interface ProjectConfig {
+  /**
+   * Schema 版本号（FEAT-005 新增）
+   *
+   * 用途：loadProjectConfig 在 yaml 解析后通过本字段决定是否触发迁移。
+   * 缺失时迁移调度器视为旧版，逐版本应用迁移函数。
+   */
+  version: number;
   /** 已关联的 Skills 名称列表 */
   skills: string[];
   /** 已关联的 Commands 名称列表（预留） */

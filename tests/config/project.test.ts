@@ -1,6 +1,7 @@
 /**
  * 项目配置管理模块 (src/config/project.ts) 单元测试
  * 适配 v0.2.0：ProjectConfig 按资源类型分组
+ * FEAT-005：ProjectConfig 加 version 字段；测试改用 toMatchObject 容忍 version 字段
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs/promises';
@@ -15,6 +16,7 @@ import {
   getProjectConfigPath,
   getProjectResourceList,
 } from '../../src/config/project.js';
+import { CURRENT_PROJECT_CONFIG_VERSION } from '../../src/config/version.js';
 
 /** 测试用的临时目录 */
 let tempDir: string;
@@ -59,7 +61,7 @@ describe('loadProjectConfig', () => {
     );
 
     const result = await loadProjectConfig(tempDir);
-    expect(result).toEqual({ skills: ['skill-a', 'skill-b'] });
+    expect(result).toMatchObject({ skills: ['skill-a', 'skill-b'] });
   });
 
   it('读取按资源类型分组的完整配置', async () => {
@@ -80,7 +82,7 @@ describe('loadProjectConfig', () => {
     );
 
     const result = await loadProjectConfig(tempDir);
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       skills: ['skill-a'],
       commands: ['cmd-x'],
       rules: ['rule-y'],
@@ -97,7 +99,7 @@ describe('loadProjectConfig', () => {
     );
 
     const result = await loadProjectConfig(tempDir);
-    expect(result).toEqual({ skills: [] });
+    expect(result).toMatchObject({ skills: [] });
   });
 
   it('YAML 格式错误时返回 null', async () => {
@@ -124,7 +126,7 @@ describe('loadProjectConfig', () => {
     );
 
     const result = await loadProjectConfig(tempDir);
-    expect(result).toEqual({ skills: [], commands: ['cmd-a'] });
+    expect(result).toMatchObject({ skills: [], commands: ['cmd-a'] });
   });
 
   it('过滤非字符串元素', async () => {
@@ -137,13 +139,16 @@ describe('loadProjectConfig', () => {
     );
 
     const result = await loadProjectConfig(tempDir);
-    expect(result).toEqual({ skills: ['skill-a', 'skill-b'] });
+    expect(result).toMatchObject({ skills: ['skill-a', 'skill-b'] });
   });
 });
 
 describe('saveProjectConfig', () => {
   it('目录不存在时自动创建并保存', async () => {
-    await saveProjectConfig(tempDir, { skills: ['skill-a', 'skill-b'] });
+    await saveProjectConfig(tempDir, {
+      version: CURRENT_PROJECT_CONFIG_VERSION,
+      skills: ['skill-a', 'skill-b'],
+    });
 
     const configPath = getProjectConfigPath(tempDir);
     const content = await fs.readFile(configPath, 'utf-8');
@@ -152,24 +157,29 @@ describe('saveProjectConfig', () => {
   });
 
   it('覆盖已有配置文件', async () => {
-    await saveProjectConfig(tempDir, { skills: ['old-skill'] });
     await saveProjectConfig(tempDir, {
+      version: CURRENT_PROJECT_CONFIG_VERSION,
+      skills: ['old-skill'],
+    });
+    await saveProjectConfig(tempDir, {
+      version: CURRENT_PROJECT_CONFIG_VERSION,
       skills: ['new-skill-a', 'new-skill-b'],
     });
 
     const result = await loadProjectConfig(tempDir);
-    expect(result).toEqual({ skills: ['new-skill-a', 'new-skill-b'] });
+    expect(result).toMatchObject({ skills: ['new-skill-a', 'new-skill-b'] });
   });
 
   it('按资源类型分组保存', async () => {
     await saveProjectConfig(tempDir, {
+      version: CURRENT_PROJECT_CONFIG_VERSION,
       skills: ['s1'],
       commands: ['c1', 'c2'],
       agents: ['a1'],
     });
 
     const result = await loadProjectConfig(tempDir);
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       skills: ['s1'],
       commands: ['c1', 'c2'],
       agents: ['a1'],
@@ -182,23 +192,29 @@ describe('addSkillToProject（兼容别名）', () => {
     await addSkillToProject(tempDir, 'skill-a');
 
     const result = await loadProjectConfig(tempDir);
-    expect(result).toEqual({ skills: ['skill-a'] });
+    expect(result).toMatchObject({ skills: ['skill-a'] });
   });
 
   it('追加新 Skill 到已有列表', async () => {
-    await saveProjectConfig(tempDir, { skills: ['skill-a'] });
+    await saveProjectConfig(tempDir, {
+      version: CURRENT_PROJECT_CONFIG_VERSION,
+      skills: ['skill-a'],
+    });
     await addSkillToProject(tempDir, 'skill-b');
 
     const result = await loadProjectConfig(tempDir);
-    expect(result).toEqual({ skills: ['skill-a', 'skill-b'] });
+    expect(result).toMatchObject({ skills: ['skill-a', 'skill-b'] });
   });
 
   it('重复 Skill 不会被添加', async () => {
-    await saveProjectConfig(tempDir, { skills: ['skill-a'] });
+    await saveProjectConfig(tempDir, {
+      version: CURRENT_PROJECT_CONFIG_VERSION,
+      skills: ['skill-a'],
+    });
     await addSkillToProject(tempDir, 'skill-a');
 
     const result = await loadProjectConfig(tempDir);
-    expect(result).toEqual({ skills: ['skill-a'] });
+    expect(result).toMatchObject({ skills: ['skill-a'] });
   });
 });
 
@@ -213,7 +229,10 @@ describe('addResourceToProject（按资源类型）', () => {
   });
 
   it('向已有 skills 列表追加 skills 类型资源', async () => {
-    await saveProjectConfig(tempDir, { skills: ['skill-a'] });
+    await saveProjectConfig(tempDir, {
+      version: CURRENT_PROJECT_CONFIG_VERSION,
+      skills: ['skill-a'],
+    });
     await addResourceToProject(tempDir, 'skills', 'skill-b');
 
     const result = await loadProjectConfig(tempDir);
@@ -243,6 +262,7 @@ describe('addResourceToProject（按资源类型）', () => {
 describe('getProjectResourceList', () => {
   it('读取各类型列表', () => {
     const cfg = {
+      version: CURRENT_PROJECT_CONFIG_VERSION,
       skills: ['s'],
       commands: ['c'],
       agents: ['a'],
@@ -255,7 +275,7 @@ describe('getProjectResourceList', () => {
   });
 
   it('缺失类型返回空数组', () => {
-    const cfg = { skills: ['s'] };
+    const cfg = { version: CURRENT_PROJECT_CONFIG_VERSION, skills: ['s'] };
     expect(getProjectResourceList(cfg, 'commands')).toEqual([]);
     expect(getProjectResourceList(cfg, 'agents')).toEqual([]);
     expect(getProjectResourceList(cfg, 'rules')).toEqual([]);

@@ -41,7 +41,7 @@ afterEach(async () => {
 function makeTargets(): Target[] {
   return [
     { name: 'codebuddy', enabled: true, user_base: '~/.codebuddy' },
-    { name: 'claude-code', enabled: false, user_base: '~/.claude' },
+    { name: 'claude-internal', enabled: false, user_base: '~/.claude-internal' },
   ];
 }
 
@@ -114,8 +114,8 @@ describe('saveConfig / loadConfig', () => {
     expect(loaded!.user_subscriptions.skills).toEqual([]);
   });
 
-  it('缺少 user_subscriptions 字段的旧配置 → 报错返回 null', async () => {
-    /* v0.3 时期的合法配置：缺 user_subscriptions */
+  it('缺少 user_subscriptions 字段的旧配置 → 自动迁移补默认空订阅（FEAT-005）', async () => {
+    /* v0.3 时期的合法配置：缺 user_subscriptions、缺 version */
     await fs.mkdir(path.join(fakeHome, '.aitools'), { recursive: true });
     await fs.writeFile(
       getConfigPath(),
@@ -133,8 +133,15 @@ describe('saveConfig / loadConfig', () => {
     );
 
     const loaded = await loadConfig();
-    /* 校验失败通过 logger 报错后返回 null；不应抛异常污染用例 */
-    expect(loaded).toBeNull();
+    /* FEAT-005：迁移管线接管，配置自动升级；user_subscriptions 补为空 skills */
+    expect(loaded).not.toBeNull();
+    expect(loaded!.user_subscriptions.skills).toEqual([]);
+    /* 备份文件已生成 */
+    const backupExists = await fs
+      .access(getConfigPath() + '.bak')
+      .then(() => true)
+      .catch(() => false);
+    expect(backupExists).toBe(true);
   });
 
   it('过滤非字符串/空串元素', async () => {

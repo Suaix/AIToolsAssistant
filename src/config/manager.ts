@@ -8,6 +8,9 @@ import path from 'node:path';
 import os from 'node:os';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { logger } from '../utils/logger.js';
+import { getDefaultEnabledTools, getAllTools } from '../registry/tools.js';
+import { CURRENT_CONFIG_VERSION } from './version.js';
+import { migrateConfigDispatch } from './migrations/index.js';
 import type {
   Config,
   Target,
@@ -157,30 +160,33 @@ function normalizeUserSubscriptions(raw: unknown): UserSubscriptions {
 
 /**
  * 获取默认同步目标列表
- * v0.2.0：user_path → user_base；codebuddy 默认启用，claude-code 默认不启用
- * @returns 默认目标工具配置数组
+ *
+ * FEAT-005：从 SSOT（shared/tools.json）派生，不再硬编码 claude-code 旧名。
+ * 行为：
+ *   - 已知的所有工具都会出现在默认列表中
+ *   - 是否 enabled 由 SSOT 中的 defaultEnabled 字段决定
+ *
+ * @returns 默认目标工具配置数组（按 SSOT 中的声明顺序）
  */
 export function getDefaultTargets(): Target[] {
-  return [
-    {
-      name: 'codebuddy',
-      enabled: true,
-      user_base: '~/.codebuddy',
-    },
-    {
-      name: 'claude-code',
-      enabled: false,
-      user_base: '~/.claude',
-    },
-  ];
+  const defaults = getDefaultEnabledTools();
+  const defaultNames = new Set(defaults.map((t) => t.name));
+  /* 列表包含所有工具；通过 defaultNames 决定 enabled 初值，避免循环内 new 多次 */
+  return getAllTools().map((t) => ({
+    name: t.name,
+    enabled: defaultNames.has(t.name),
+    user_base: t.userBase,
+  }));
 }
 
 /**
  * 校验配置文件的有效性
- * 检查必需字段是否存在和格式是否正确
- * 发现旧版字段（如 user_path）时抛出明确错误，引导用户重新初始化
- * v0.4.0：要求 user_subscriptions 字段存在；缺失视为旧版配置，报错引导重建
- * @param config 待校验的配置对象
+ *
+ * FEAT-005：移除 v0.2.0 / v0.4.0 schema 报错路径——这些场景已由迁移管线
+ * （src/config/migrations/）在 loadConfig 内部自动处理。本函数仅做"迁移
+ * 完成后"的最终结构合法性校验。
+ *
+ * @param config 待校验的配置对象（已经过迁移管线处理）
  * @returns 校验通过返回 true，否则抛出错误
  */
 function validateConfig(config: unknown): config is Config {
@@ -189,6 +195,11 @@ function validateConfig(config: unknown): config is Config {
   }
 
   const obj = config as Record<string, unknown>;
+
+  /* 校验 version 字段（FEAT-005 引入） */
+  if (typeof obj.version !== 'number') {
+    throw new Error('配置文件缺少 version 字段（迁移异常，请联系维护者）');
+  }
 
   /* 校验 source 字段 */
   if (!obj.source || typeof obj.source !== 'string') {
@@ -210,29 +221,15 @@ function validateConfig(config: unknown): config is Config {
     if (typeof target.enabled !== 'boolean') {
       throw new Error(`目标 "${target.name}" 缺少有效的 enabled 字段`);
     }
-
-    /* v0.2.0 破坏性校验：检测旧字段 user_path */
-    if ('user_path' in target && !('user_base' in target)) {
-      throw new Error(
-        `检测到旧版配置字段 user_path（目标 "${target.name}"），v0.2.0 已改为 user_base。请运行 aitools init 重新初始化配置。`,
-      );
-    }
-
     if (!target.user_base || typeof target.user_base !== 'string') {
       throw new Error(`目标 "${target.name}" 缺少有效的 user_base 字段`);
     }
   }
 
-  /**
-   * v0.4.0 破坏性校验：要求 user_subscriptions 字段存在
-   *
-   * 缺失该字段意味着配置是 v0.3 或更早的版本。按 RFC-001 §6 规定，
-   * 本次为破坏性重构、不提供迁移工具，因此直接报错让用户按升级指引重建。
-   */
+  /* user_subscriptions 由迁移管线保证存在；此处仅做存在性兜底 */
   if (!('user_subscriptions' in obj)) {
     throw new Error(
-      '配置文件缺少 user_subscriptions 字段（v0.4.0 订阅模型引入）。' +
-        '请参考 RFC-001 §6.2 升级指引：备份 ~/.aitools 后执行 `rm -rf ~/.aitools && aitools init` 重建。',
+      '配置文件缺少 user_subscriptions 字段（迁移异常，请联系维护者）',
     );
   }
 
@@ -241,58 +238,100 @@ function validateConfig(config: unknown): config is Config {
 
 /**
  * 读取并解析配置文件
- * 如果配置文件不存在，输出错误提示并返回 null
- * v0.4.0：校验通过后，将 user_subscriptions 规范化为合法结构（过滤非字符串、补齐空数组）
+ *
+ * 流程（FEAT-005）：read → migrate → validate → normalize
+ *   1. 读取 yaml 文件，解析为对象
+ *   2. 调用迁移调度器（migrateConfigDispatch）：检测 version、备份、按需应用迁移、写回
+ *   3. 校验最终结构合法性（validateConfig）
+ *   4. 规范化 user_subscriptions 子字段
+ *
+ * 测试场景：可通过 setDefaultReporter(NoopMigrationReporter) 静默迁移日志。
+ *
  * @returns 解析后的 Config 对象，或 null（配置不存在/无效时）
  */
 export async function loadConfig(): Promise<Config | null> {
   const configPath = getConfigPath();
 
+  let parsed: unknown;
   try {
     const content = await fs.readFile(configPath, 'utf-8');
-    const parsed = parseYaml(content);
-
-    if (validateConfig(parsed)) {
-      /**
-       * 校验通过仅保证 user_subscriptions 字段存在；但 YAML 里的值可能是 null
-       * 或缺少子字段（如只写了 `user_subscriptions:` 没跟内容）。
-       * 这里统一通过规范化函数兜底，保证下游拿到 `{ skills: [...] }` 结构。
-       */
-      parsed.user_subscriptions = normalizeUserSubscriptions(
-        parsed.user_subscriptions,
-      );
-      return parsed;
-    }
-
-    return null;
+    parsed = parseYaml(content);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       logger.error('请先运行 aitools init 进行初始化');
       return null;
     }
-
-    /* YAML 解析错误或校验错误 */
     const message = error instanceof Error ? error.message : String(error);
     logger.error(`配置文件解析失败: ${message}`);
     logger.info('建议重新运行 aitools init 进行初始化');
     return null;
   }
+
+  /* 类型守卫：parseYaml 可能返回 null/string/number 等非对象值 */
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    logger.error('配置文件格式无效：不是有效的 YAML 对象');
+    return null;
+  }
+
+  /* 迁移管线：read → migrate → save */
+  let migrated: Record<string, unknown>;
+  try {
+    const dispatchResult = await migrateConfigDispatch(
+      parsed as Record<string, unknown>,
+      configPath,
+    );
+    migrated = dispatchResult.config;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error(`配置迁移失败: ${message}`);
+    return null;
+  }
+
+  /* 最终结构校验 */
+  try {
+    if (!validateConfig(migrated)) {
+      return null;
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error(`配置文件解析失败: ${message}`);
+    return null;
+  }
+
+  /* 规范化 user_subscriptions 子字段（兜底处理 yaml 里的 null/缺字段场景） */
+  migrated.user_subscriptions = normalizeUserSubscriptions(
+    migrated.user_subscriptions,
+  );
+
+  return migrated as Config;
 }
 
 /**
  * 将配置对象写入配置文件
- * 自动创建 ~/.aitools/ 目录（如不存在）
+ *
+ * 自动创建 ~/.aitools/ 目录（如不存在）。
+ * FEAT-005：保证 version 字段在 yaml 首行（TD-7 设计决策，便于人眼自查）。
+ *
  * @param config 待写入的配置对象
  */
 export async function saveConfig(config: Config): Promise<void> {
   const configDir = getConfigDir();
   const configPath = getConfigPath();
 
-  /* 确保配置目录存在 */
+  /* 确保配置目录存在（aitools 自身目录，不违反 US-6 边界守卫） */
   await fs.mkdir(configDir, { recursive: true });
 
+  /* 重排：version 在首行 */
+  const ordered: Record<string, unknown> = {
+    version: config.version ?? CURRENT_CONFIG_VERSION,
+    source: config.source,
+    targets: config.targets,
+    sync: config.sync,
+    user_subscriptions: config.user_subscriptions,
+  };
+
   /* 将配置序列化为 YAML 并写入 */
-  const yamlContent = stringifyYaml(config, {
+  const yamlContent = stringifyYaml(ordered, {
     lineWidth: 0, // 不自动换行
     singleQuote: false, // 使用双引号
   });
@@ -303,12 +342,14 @@ export async function saveConfig(config: Config): Promise<void> {
 /**
  * 基于用户输入创建新的配置对象
  * v0.4.0：默认 user_subscriptions 为空；新用户需通过 `aitools subscribe` 显式订阅
+ * FEAT-005：写入 version 字段，与当前 schema 一致
  * @param source 用户指定的资源源目录路径
  * @param targets 同步目标工具列表
  * @returns 完整的 Config 对象
  */
 export function createConfig(source: string, targets: Target[]): Config {
   return {
+    version: CURRENT_CONFIG_VERSION,
     source,
     targets,
     sync: getDefaultSyncOptions(),
