@@ -55,6 +55,8 @@ interface SummaryInfo {
   created: number;
   updated: number;
   skipped: number;
+  /** AI 工具未安装跳过数（FEAT-005 US-6） */
+  skippedMissingTool: number;
 }
 
 /** 组件 Props */
@@ -188,6 +190,8 @@ export function SyncProgressModal({
         created: (prev?.created ?? 0) + data.created,
         updated: (prev?.updated ?? 0) + data.updated,
         skipped: (prev?.skipped ?? 0) + data.skipped,
+        skippedMissingTool:
+          (prev?.skippedMissingTool ?? 0) + (data.skippedMissingTool ?? 0),
       }));
       return;
     }
@@ -454,6 +458,8 @@ function ModalStatusHeader({
           >
             共处理 {summary.totalSkills} 个资源 · 新增 {summary.created} · 更新{' '}
             {summary.updated} · 跳过 {summary.skipped}
+            {summary.skippedMissingTool > 0 &&
+              ` · 未检测到工具 ${summary.skippedMissingTool}`}
           </div>
         )}
       </div>
@@ -465,7 +471,10 @@ function ModalStatusHeader({
  * 子组件：单行进度项
  * ============================================================ */
 
-/** progress 事件的 action 到 badge 样式映射 */
+/** progress 事件的 action 到 badge 样式映射
+ *
+ * FEAT-005：新增 'skipped_missing_tool' badge（灰色 ⊘ 风格，表示工具未安装）
+ */
 const ACTION_BADGE: Record<
   SyncProgressData['action'],
   { label: string; cls: string }
@@ -473,6 +482,7 @@ const ACTION_BADGE: Record<
   created: { label: '新增', cls: 'badge--success' },
   updated: { label: '更新', cls: 'badge--warning' },
   skipped: { label: '已最新', cls: 'badge--neutral' },
+  skipped_missing_tool: { label: '未检测到', cls: 'badge--neutral' },
   failed: { label: '失败', cls: 'badge--danger' },
 };
 
@@ -482,6 +492,8 @@ interface ProgressRowProps {
 
 /**
  * 单条进度项：badge + 资源名 → 目标名
+ *
+ * FEAT-005：'skipped_missing_tool' 时尾部追加灰色路径提示，让用户清楚为何被跳过
  */
 function ProgressRow({ data }: ProgressRowProps) {
   const badge = ACTION_BADGE[data.action];
@@ -524,6 +536,18 @@ function ProgressRow({ data }: ProgressRowProps) {
             }}
           >
             · {data.error}
+          </span>
+        )}
+        {data.action === 'skipped_missing_tool' && data.expectedPath && (
+          <span
+            style={{
+              marginLeft: 'var(--space-2)',
+              color: 'var(--color-text-tertiary)',
+              fontSize: '0.875em',
+            }}
+            title="aitools 不会代为创建 AI 工具的家目录。请先安装该工具或在配置中禁用。"
+          >
+            · {data.expectedPath} 不存在
           </span>
         )}
       </span>

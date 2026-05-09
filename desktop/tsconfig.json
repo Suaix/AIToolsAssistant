@@ -20,12 +20,13 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
 
-    /* Path alias：@/* 指向 src/*；@design-system/* 指向设计系统源 */
+    /* Path alias：@/* 指向 src/*；@design-system/* 指向设计系统源；@shared/* 指向 SSOT */
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
-      "@design-system/*": ["../docs/design-system/*"]
+      "@design-system/*": ["../docs/design-system/*"],
+      "@shared/*": ["../shared/*"]
     }
   },
-  "include": ["src"]
+  "include": ["src", "../shared/**/*.ts"]
 }

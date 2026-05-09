@@ -118,14 +118,25 @@ export interface SyncProgressData {
   target: string;
   /** 订阅落点 */
   location: SyncLocationData;
-  /** 动作：created / updated / skipped / failed */
-  action: 'created' | 'updated' | 'skipped' | 'failed';
+  /**
+   * 动作：created / updated / skipped / skipped_missing_tool / failed
+   *
+   * FEAT-005：新增 'skipped_missing_tool' 表示因 AI 工具家目录不存在而跳过
+   */
+  action:
+    | 'created'
+    | 'updated'
+    | 'skipped'
+    | 'skipped_missing_tool'
+    | 'failed';
   /** 当前进度（1-based） */
   index: number;
   /** 总任务数 */
   total: number;
   /** 失败原因 */
   error?: string;
+  /** action === 'skipped_missing_tool' 时的预期路径（FEAT-005） */
+  expectedPath?: string;
 }
 
 /** sync summary 事件载荷（v0.4：scope → location） */
@@ -139,6 +150,8 @@ export interface SyncSummaryData {
   created: number;
   updated: number;
   skipped: number;
+  /** 跳过数（AI 工具未安装；FEAT-005 US-6） */
+  skippedMissingTool?: number;
 }
 
 /** 所有 CLI JSON 事件的联合类型（v0.4：新增 target.enabled / target.disabled） */

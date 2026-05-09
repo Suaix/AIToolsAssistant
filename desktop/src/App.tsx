@@ -15,6 +15,10 @@ import { ThemeToggle } from './components/ThemeToggle';
 import { ProjectSwitcher } from './components/ProjectSwitcher';
 import { OnboardingWizard } from './components/OnboardingWizard';
 import { InvalidProjectModal } from './components/InvalidProjectModal';
+import {
+  ConfigMigrationModal,
+  type GuiMigrationOutcome,
+} from './components/ConfigMigrationModal';
 import { Overview, type OverviewData } from './pages/Overview';
 import { Skills } from './pages/Skills';
 import { Tools } from './pages/Tools';
@@ -106,6 +110,78 @@ export function App() {
     connectedTools: string[];
     expectedDirs: string[];
   } | null>(null);
+
+  /** 配置自动升级弹窗状态（null=不显示）·FEAT-005 */
+  const [migrationOutcome, setMigrationOutcome] =
+    useState<GuiMigrationOutcome | null>(null);
+
+  /* ---- 启动时探测 .last-migration.json ---- */
+  useEffect(() => {
+    void (async () => {
+      try {
+        /* 通过 Tauri 读取 ~/.aitools/.last-migration.json，
+           CLI 端迁移管线落盘；GUI 仅消费 migrated / migrated_with_conflicts */
+        const { invoke } = await import('@tauri-apps/api/core');
+        const { homeDir } = await import('@tauri-apps/api/path');
+        const home = await homeDir();
+        const fileRel = '.aitools/.last-migration.json';
+        const ackKey = 'aitools.migrationAck';
+
+        const raw = await invoke<string | null>('read_text_file_optional', {
+          basePath: home,
+          relativePath: fileRel,
+        }).catch(() => null);
+
+        if (!raw) return;
+
+        const parsed = JSON.parse(raw) as
+          | (GuiMigrationOutcome & { persistedAt?: string })
+          | null;
+        if (!parsed) return;
+
+        /* localStorage ack：按 persistedAt 维度去重，避免重复弹窗 */
+        const ackedAt = window.localStorage.getItem(ackKey);
+        if (ackedAt && parsed.persistedAt && ackedAt === parsed.persistedAt) {
+          return;
+        }
+
+        if (
+          parsed.status === 'migrated' ||
+          parsed.status === 'migrated_with_conflicts'
+        ) {
+          setMigrationOutcome(parsed);
+        }
+      } catch {
+        /* 兜底通道失败不影响主流程 */
+      }
+    })();
+  }, []);
+
+  /** 关闭迁移弹窗：写 ack + 清理落盘文件 */
+  const handleAckMigration = useCallback(() => {
+    void (async () => {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const { homeDir } = await import('@tauri-apps/api/path');
+        const home = await homeDir();
+        await invoke('delete_file_optional', {
+          basePath: home,
+          relativePath: '.aitools/.last-migration.json',
+        }).catch(() => {});
+
+        if (migrationOutcome && 'persistedAt' in migrationOutcome) {
+          const persistedAt = (migrationOutcome as { persistedAt?: string })
+            .persistedAt;
+          if (persistedAt) {
+            window.localStorage.setItem('aitools.migrationAck', persistedAt);
+          }
+        }
+      } catch {
+        /* ack 写入失败不影响主流程 */
+      }
+      setMigrationOutcome(null);
+    })();
+  }, [migrationOutcome]);
 
   /* ---- 启动时加载 GUI 状态 ---- */
   useEffect(() => {
@@ -398,6 +474,14 @@ export function App() {
           connectedTools={invalidProject.connectedTools}
           expectedDirs={invalidProject.expectedDirs}
           onClose={() => setInvalidProject(null)}
+        />
+      )}
+
+      {/* 配置自动升级弹窗（FEAT-005） */}
+      {migrationOutcome && (
+        <ConfigMigrationModal
+          outcome={migrationOutcome}
+          onAck={handleAckMigration}
         />
       )}
     </div>

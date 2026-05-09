@@ -351,6 +351,52 @@ fn detect_project_tools(
     Ok(found)
 }
 
+/// 读取相对路径下的文本文件（可选）（FEAT-005）
+///
+/// 用途：GUI 启动时探测 ~/.aitools/.last-migration.json，
+/// 该文件可能不存在（新装用户 / 已 ack 用户）。
+///
+/// 行为约定：
+///   - 文件存在 → 返回内容字符串
+///   - 文件不存在 → 返回 None（前端 .catch 兜底转 null）
+///   - 其他 IO 错误 → Err，前端 .catch 也转 null
+///
+/// 安全约束：basePath 必须是绝对路径，relativePath 不允许 .. 跳出
+#[tauri::command]
+fn read_text_file_optional(base_path: String, relative_path: String) -> Result<Option<String>, String> {
+    if relative_path.contains("..") {
+        return Err("relative_path 不允许包含 ..".to_string());
+    }
+    let full = std::path::Path::new(&base_path).join(&relative_path);
+    match std::fs::read_to_string(&full) {
+        Ok(content) => Ok(Some(content)),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(format!("读取文件失败: {}", err)),
+    }
+}
+
+/// 删除相对路径下的文件（可选）（FEAT-005）
+///
+/// 用途：GUI ack 配置升级弹窗后清理 ~/.aitools/.last-migration.json，
+/// 避免下次启动重复弹窗。
+///
+/// 行为约定：
+///   - 文件存在 → 删除并返回 ()
+///   - 文件不存在 → 返回 ()（幂等，不报错）
+///   - 删除失败 → Err
+#[tauri::command]
+fn delete_file_optional(base_path: String, relative_path: String) -> Result<(), String> {
+    if relative_path.contains("..") {
+        return Err("relative_path 不允许包含 ..".to_string());
+    }
+    let full = std::path::Path::new(&base_path).join(&relative_path);
+    match std::fs::remove_file(&full) {
+        Ok(_) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(format!("删除文件失败: {}", err)),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -371,7 +417,9 @@ pub fn run() {
             invoke_cli_stream,
             open_directory_dialog,
             ensure_project_config,
-            detect_project_tools
+            detect_project_tools,
+            read_text_file_optional,
+            delete_file_optional
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

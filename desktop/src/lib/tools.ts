@@ -1,17 +1,27 @@
 /**
- * 工具元数据与项目工具探测（FEAT-004）
+ * 工具元数据与项目工具探测（FEAT-005 SSOT 接入）
  *
- * 作为前端"工具"概念的单一真相源：
- *   · AVAILABLE_TOOLS         —— 预定义可连接工具（与 CLI target.name 对齐）
- *   · TOOL_PROJECT_DIR_ALIASES —— 工具名 → 项目根标记目录候选名（含双名兼容）
- *   · TOOL_DISPLAY_NAME       —— 工具名 → 展示名（含双名兼容）
- *   · detectProjectTools      —— 通过 Tauri 命令动态探测当前项目实际关联的工具
+ * 职责：
+ *   作为前端"工具"概念的薄类型适配层，实际数据全部来自 SSOT（shared/tools.json）。
+ *   不再硬编码工具列表 / 显示名 / 项目目录别名。
  *
- * 双名兼容（D-8）：仓库内对 Claude 工具存在 'claude-internal' / 'claude-code' 两版命名，
- *   本任务保持只读不统一，由 FEAT-005 后续治理。
+ * 历史变更：
+ *   FEAT-004：本文件维护 AVAILABLE_TOOLS / TOOL_PROJECT_DIR_ALIASES / TOOL_DISPLAY_NAME 三套硬编码
+ *   FEAT-005：删除全部硬编码，改为 import @shared/tools.json；下线 TOOL_PROJECT_DIR_ALIASES
+ *             双名映射（迁移管线已把 .claude-code 改写为 .claude-internal，无需运行时兼容）
  */
 
-/** 预定义工具元数据 */
+import toolsJson from '@shared/tools.json';
+import type {
+  ToolDefinition as SsotToolDefinition,
+  ToolsRegistry,
+} from '@shared/tools.schema';
+
+/* ============================================================
+ * 类型适配层（保留前端原有 ToolDefinition 字段命名风格）
+ * ============================================================ */
+
+/** 预定义工具元数据（前端形态） */
 export interface ToolDefinition {
   /** 工具唯一标识，与 CLI target.name 一致 */
   name: string;
@@ -21,44 +31,51 @@ export interface ToolDefinition {
   userBase: string;
 }
 
-/** 预定义可连接工具列表（迁出自 AddToolModal.tsx） */
-export const AVAILABLE_TOOLS: ToolDefinition[] = [
-  { name: 'codebuddy', displayName: 'CodeBuddy', userBase: '~/.codebuddy' },
-  { name: 'workbuddy', displayName: 'WorkBuddy', userBase: '~/.workbuddy' },
-  {
-    name: 'claude-internal',
-    displayName: 'Claude Internal',
-    userBase: '~/.claude-internal',
-  },
-];
+/* ============================================================
+ * 强类型 SSOT 引用 + 派生数据
+ * ============================================================ */
+
+/** 已加载的 SSOT 注册表（编译期 inline，运行时零开销） */
+const REGISTRY: ToolsRegistry = toolsJson as ToolsRegistry;
 
 /**
- * 工具名 → 项目根目录候选标记目录名（含双名兼容映射）
+ * 预定义可连接工具列表
  *
- * 规则：value 中的目录名带 . 前缀；命中其中任一即认为该工具与项目关联。
- *
- * 双名兼容：claude-internal 与 claude-code 互为 alias，
- *   既识别 .claude-internal/ 也识别 .claude-code/。
- *   FEAT-005 完成统一后可简化为单向映射。
+ * 来源：shared/tools.json
+ * 顺序：保持 SSOT 中的声明顺序（影响 GUI AddToolModal 选项顺序）
  */
-export const TOOL_PROJECT_DIR_ALIASES: Record<string, string[]> = {
-  codebuddy: ['.codebuddy'],
-  workbuddy: ['.workbuddy'],
-  'claude-internal': ['.claude-internal', '.claude-code'],
-  'claude-code': ['.claude-code', '.claude-internal'],
-};
+export const AVAILABLE_TOOLS: ToolDefinition[] = REGISTRY.tools.map(
+  (t: SsotToolDefinition) => ({
+    name: t.name,
+    displayName: t.displayName,
+    userBase: t.userBase,
+  }),
+);
 
 /**
- * 工具名 → 展示名映射（含双名兼容）
+ * 工具名 → 项目根目录候选标记目录名映射
+ *
+ * FEAT-005 简化：每个工具只保留 SSOT 中声明的 projectDirAliases。
+ * 删除了 FEAT-004 中的 claude-internal/claude-code 双名兼容（已通过迁移管线统一为 claude-internal）。
+ */
+export const TOOL_PROJECT_DIR_ALIASES: Record<string, string[]> =
+  Object.fromEntries(
+    REGISTRY.tools.map((t: SsotToolDefinition) => [t.name, t.projectDirAliases]),
+  );
+
+/**
+ * 工具名 → 展示名映射
  *
  * 用于：Skills 行 badge 文案、SubscribePopover 副文案、InvalidProjectModal 已连接列表。
  * 任何 raw target.target 字段都能映射出 displayName，未匹配时回退原值。
+ *
+ * FEAT-005：保留 cursor 兜底（不在 SSOT 中但 Tools 页历史展示过）；
+ * 其他工具直接来自 SSOT。
  */
 export const TOOL_DISPLAY_NAME: Record<string, string> = {
-  codebuddy: 'CodeBuddy',
-  workbuddy: 'WorkBuddy',
-  'claude-internal': 'Claude Internal',
-  'claude-code': 'Claude Code',
+  ...Object.fromEntries(
+    REGISTRY.tools.map((t: SsotToolDefinition) => [t.name, t.displayName]),
+  ),
   /* 兼容性：Tools 页历史上还展示过 cursor，本表保留以避免回归 */
   cursor: 'Cursor',
 };
@@ -66,7 +83,7 @@ export const TOOL_DISPLAY_NAME: Record<string, string> = {
 /**
  * 获取工具的展示名
  *
- * @param toolName 工具名（如 'codebuddy' / 'claude-code'）
+ * @param toolName 工具名（如 'codebuddy' / 'claude-internal'）
  * @returns 展示名；无映射时回退为 toolName 原值
  */
 export function getToolDisplayName(toolName: string): string {
@@ -77,7 +94,7 @@ export function getToolDisplayName(toolName: string): string {
  * 聚合一组工具的"期望存在的标记目录名"集合（去重）
  *
  * @param tools 工具名列表（如 ['codebuddy', 'claude-internal']）
- * @returns 候选目录名列表（如 ['.codebuddy', '.claude-internal', '.claude-code']）
+ * @returns 候选目录名列表（如 ['.codebuddy', '.claude-internal']）
  */
 export function aggregateExpectedDirs(tools: string[]): string[] {
   const set = new Set<string>();

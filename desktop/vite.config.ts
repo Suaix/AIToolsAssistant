@@ -17,6 +17,8 @@ export default defineConfig({
     alias: {
       '@': path.resolve(__dirname, './src'),
       '@design-system': path.resolve(__dirname, '../docs/design-system'),
+      /* FEAT-005：跨包共享的 SSOT（仓库根 shared/） */
+      '@shared': path.resolve(__dirname, '../shared'),
     },
   },
 
