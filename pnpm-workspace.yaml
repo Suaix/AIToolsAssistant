@@ -1,0 +1,9 @@
+# pnpm workspace 声明
+# 文档：https://pnpm.io/pnpm-workspace_yaml
+#
+# 包列表：
+#   - packages/cli      → @aitools/cli      （发 npm；bin: aitools）
+#   - packages/desktop  → @aitools/desktop  （Tauri 桌面 App，private）
+#   - packages/shared   → @aitools/shared   （跨端公共契约，private）
+packages:
+  - "packages/*"

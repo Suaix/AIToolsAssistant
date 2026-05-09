@@ -4,4 +4,14 @@ dist/
 coverage/
 pnpm-debug.log*
 .codebuddy/
+
 .aitools
+
+# workspace 产物（REFACTOR-001）
+packages/*/dist/
+packages/*/node_modules/
+packages/*/coverage/
+packages/*/*.tsbuildinfo
+
+# desktop Tauri Rust 产物
+packages/desktop/src-tauri/target/

@@ -3,7 +3,7 @@
 > **任务编号**：FEAT-005
 > **创建日期**：2026-05-09
 > **需求文档**：[01-requirements.md](./01-requirements.md)
-> **状态**：草稿（待 DESIGN → TECHNICAL 门禁）
+> **状态**：通过
 
 ---
 

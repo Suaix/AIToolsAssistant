@@ -57,50 +57,79 @@
 
 ```
 AIToolsAssistant/
-├── src/                                ← CLI 工具源码（TypeScript）
-│   ├── index.ts                        ← CLI 入口
-│   ├── commands/                       ← 子命令（init / sync / list）
-│   ├── core/                           ← 核心业务（扫描、同步、hash）
-│   ├── config/                         ← 配置读写
-│   └── utils/                          ← 工具
-├── tests/                              ← 单元测试
+├── packages/                           ← 🏗️ pnpm workspace 三段式（REFACTOR-001）
+│   ├── cli/                            ← @aitools/cli（命令行工具，发布到 npm）
+│   │   ├── src/
+│   │   │   ├── index.ts                ← CLI 入口
+│   │   │   ├── commands/               ← 子命令（init / sync / list）
+│   │   │   ├── core/                   ← 核心业务（扫描、同步、hash）
+│   │   │   ├── config/                 ← 配置读写
+│   │   │   ├── registry/               ← SSOT 适配层
+│   │   │   └── utils/                  ← 工具
+│   │   ├── tests/                      ← Vitest 单元测试（186 用例）
+│   │   ├── package.json
+│   │   ├── tsconfig.json / tsup.config.ts / vitest.config.ts
+│   │   └── README.md                   ← CLI 详细文档
+│   ├── desktop/                        ← @aitools/desktop（Tauri GUI）
+│   │   ├── src/                        ← React 前端
+│   │   ├── src-tauri/                  ← Rust 后端
+│   │   ├── package.json
+│   │   └── vite.config.ts / tsconfig.json
+│   └── shared/                         ← @aitools/shared（跨端公共契约 SSOT）
+│       ├── src/
+│       │   ├── index.ts                ← 聚合导出
+│       │   ├── tools.json              ← 工具元信息唯一真相源
+│       │   └── tools.schema.ts         ← 类型定义
+│       └── package.json / tsconfig.json
 ├── docs/
-│   └── design-system/                  ← 🎨 完整设计系统
-│       ├── README.md                   ← 设计系统总览
-│       ├── AI_INSTRUCTIONS.md          ← 🚨 给 AI 的强制指令（UI 任务必读）
-│       ├── 01-brand-strategy.md        ← L1 品牌战略
-│       ├── 02-design-principles.md     ← L2 设计原则（4 条铁律）
-│       ├── 03-information-architecture.md ← L3 信息架构
-│       ├── 04-visual-language.md       ← L4 视觉语言
-│       ├── tokens.css                  ← L4 CSS 变量（唯一真相源）
-│       ├── 05-component-spec.md        ← L5 组件规范
-│       └── 07-review-checklist.md      ← L7 走查清单
+│   ├── design-system/                  ← 🎨 完整设计系统
+│   │   ├── README.md                   ← 设计系统总览
+│   │   ├── AI_INSTRUCTIONS.md          ← 🚨 给 AI 的强制指令（UI 任务必读）
+│   │   ├── 01-brand-strategy.md        ← L1 品牌战略
+│   │   ├── 02-design-principles.md     ← L2 设计原则（4 条铁律）
+│   │   ├── 03-information-architecture.md ← L3 信息架构
+│   │   ├── 04-visual-language.md       ← L4 视觉语言
+│   │   ├── tokens.css                  ← L4 CSS 变量（唯一真相源）
+│   │   ├── 05-component-spec.md        ← L5 组件规范
+│   │   └── 07-review-checklist.md      ← L7 走查清单
+│   └── rfcs/                           ← 各版本 RFC
+├── .workflow/                          ← 需求/设计/技术方案归档
+├── pnpm-workspace.yaml                 ← workspace 声明
+├── package.json                        ← 伞包（aitools-workspace，private）
 └── CODEBUDDY.md                        ← 本文件
 ```
+
+> **REFACTOR-001 变更说明**：v0.5.0 起仓库结构由平铺重构为 pnpm workspace。
+> `.workflow/archived/` 中的历史文档（FEAT-001~005）保留原路径引用（如 `src/...`），仅作历史事实记录；
+> 当前代码实际位置以本章节为准。
 
 ---
 
 ## 🛠️ CLI 开发规范
 
-### 常用命令
+### 常用命令（workspace 模式）
 
 | 命令 | 作用 |
 |---|---|
-| `pnpm run build` | 使用 tsup 构建 ESM 产物到 `dist/` |
-| `pnpm run dev` | 监听模式实时编译 |
-| `pnpm run lint` | ESLint（Flat Config）校验 |
-| `pnpm run format` | Prettier 格式化 `src/` |
-| `pnpm run test` | Vitest 运行单元测试 |
-| `pnpm run start` | 执行 `./dist/index.js` |
+| `pnpm install` | 在仓库根装齐全部包依赖 |
+| `pnpm -r build` | 并行构建所有包 |
+| `pnpm -r test` | 跑所有包的测试 |
+| `pnpm -F @aitools/cli build` | 仅构建 CLI |
+| `pnpm -F @aitools/cli test` | 仅跑 CLI 测试 |
+| `pnpm -F @aitools/cli dev` | CLI 监听模式实时编译 |
+| `pnpm -F @aitools/desktop tauri:dev` | 启动 desktop 开发模式 |
+| `pnpm -F @aitools/desktop tauri:build` | 构建 desktop 安装包 |
+| `pnpm lint` | 全仓 ESLint 校验 |
 
 ### 架构要点
 
-- **CLI 框架**：`commander` 13.x，入口 `src/index.ts`
+- **CLI 框架**：`commander` 13.x，入口 `packages/cli/src/index.ts`
 - **交互**：`@inquirer/prompts`（交互式初始化）
 - **配置**：`yaml`（全局 `~/.aitools/config.yaml` + 项目级 `.aitools/project.yaml`）
-- **日志**：统一通过 `src/utils/logger.ts`（基于 `picocolors`）
+- **日志**：统一通过 `packages/cli/src/utils/logger.ts`（基于 `picocolors`）
 - **模块**：ES Modules（`"type": "module"`），Node.js ≥ 20
 - **测试**：新功能必须配套 Vitest 单元测试
+- **跨端共享**：类型与 SSOT 数据在 `@aitools/shared`，通过 `workspace:*` 协议引用
 
 ### 代码规范
 

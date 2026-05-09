@@ -28,7 +28,7 @@ const program = new Command();
 program
   .name('aitools')
   .description('AI Agent 统一配置与资源同步管理工具（skills/commands/agents/rules）')
-  .version('0.4.2');
+  .version('0.5.0');
 
 /**
  * 全局 --json flag

@@ -24,9 +24,9 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
-      "@design-system/*": ["../docs/design-system/*"],
-      "@shared/*": ["../shared/*"]
+      "@design-system/*": ["../../docs/design-system/*"],
+      "@shared/*": ["../shared/src/*"]
     }
   },
-  "include": ["src", "../shared/**/*.ts"]
+  "include": ["src", "../shared/src/**/*.ts"]
 }

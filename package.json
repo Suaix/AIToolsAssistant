@@ -1,40 +1,27 @@
 {
-  "name": "aitools-cli",
-  "version": "0.4.2",
-  "description": "AI Agent 统一配置与资源同步管理工具（skills/commands/agents/rules）· 支持 --json 输出供 GUI 消费",
+  "name": "aitools-workspace",
+  "version": "0.5.0",
+  "description": "AIToolsAssistant monorepo 根（CLI + desktop + shared）",
+  "private": true,
   "type": "module",
-  "bin": {
-    "aitools": "./dist/index.js"
-  },
-  "files": [
-    "dist",
-    "shared"
-  ],
   "scripts": {
-    "build": "tsup",
-    "dev": "tsup --watch",
-    "start": "node ./dist/index.js",
+    "preinstall": "npx only-allow pnpm",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
     "lint": "eslint .",
-    "format": "prettier --write \"src/**/*.ts\"",
-    "test": "vitest run"
-  },
-  "engines": {
-    "node": ">=20.0.0"
-  },
-  "dependencies": {
-    "@inquirer/prompts": "^7.0.0",
-    "commander": "^13.0.0",
-    "picocolors": "^1.1.0",
-    "yaml": "^2.7.0"
+    "format": "prettier --write \"packages/*/src/**/*.{ts,tsx}\"",
+    "cli": "pnpm -F @aitools/cli",
+    "desktop": "pnpm -F @aitools/desktop"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",
-    "@types/node": "^22.0.0",
     "eslint": "^9.0.0",
     "prettier": "^3.0.0",
-    "tsup": "^8.0.0",
     "typescript": "^5.0.0",
-    "typescript-eslint": "^8.0.0",
-    "vitest": "^2.0.0"
+    "typescript-eslint": "^8.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
   }
 }

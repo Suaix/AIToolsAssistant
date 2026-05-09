@@ -27,7 +27,7 @@ import { fileURLToPath } from 'node:url';
 import type {
   ToolDefinition,
   ToolsRegistry,
-} from '../../shared/tools.schema.js';
+} from '../../../shared/src/tools.schema.js';
 
 /* ============================================================
  * 模块级常量
@@ -39,10 +39,14 @@ const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 /**
  * 解析 SSOT JSON 文件的绝对路径
  *
- * 路径策略（兼容源码态与 tsup bundle 态）：
- *   - 源码态：src/registry/tools.ts → 仓库根 shared/tools.json（向上两级）
- *   - bundle 态：dist/index.js → 同根 shared/tools.json（向上一级）
- *   - 全局安装态：<install>/dist/index.js → <install>/shared/tools.json（向上一级）
+ * 路径策略（PR-1 阶段：兼容 workspace 结构下的源码态与构建态）：
+ *   - 源码态：packages/cli/src/registry/tools.ts
+ *     → 向上三级到 workspace 根，再到 packages/shared/src/tools.json
+ *   - bundle 态：packages/cli/dist/index.js
+ *     → 向上两级到 packages/，再到 shared/src/tools.json
+ *   - 全局安装态：<install>/dist/index.js
+ *     → 向上一级 <install>/shared/tools.json（npm publish 时 tsup 会把 shared 合入，
+ *       PR-2 改为 import 后此态消失）
  *
  * 实现：依次尝试候选路径，取第一个真实存在的。
  *
@@ -51,9 +55,11 @@ const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
  */
 function resolveRegistryPath(): string {
   const candidates = [
-    /* 源码态：src/registry/ → 仓库根（向上两级） */
-    path.resolve(MODULE_DIR, '..', '..', 'shared', 'tools.json'),
-    /* bundle / 全局安装态：dist/ → 包根（向上一级） */
+    /* 源码态：packages/cli/src/registry/ → workspace 根 packages/shared/src/（向上三级到 packages/ 再下潜） */
+    path.resolve(MODULE_DIR, '..', '..', '..', 'shared', 'src', 'tools.json'),
+    /* bundle 态：packages/cli/dist/ → packages/shared/src/（向上两级） */
+    path.resolve(MODULE_DIR, '..', '..', 'shared', 'src', 'tools.json'),
+    /* 全局安装态（PR-2 后废弃）：<install>/dist/ → <install>/shared/tools.json */
     path.resolve(MODULE_DIR, '..', 'shared', 'tools.json'),
   ];
   for (const candidate of candidates) {
@@ -65,7 +71,7 @@ function resolveRegistryPath(): string {
     }
   }
   throw new Error(
-    `SSOT 注册表 shared/tools.json 未找到。已尝试：${candidates.join(', ')}`,
+    `SSOT 注册表 tools.json 未找到。已尝试：${candidates.join(', ')}`,
   );
 }
 

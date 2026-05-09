@@ -5,6 +5,49 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-05-09
+
+> **结构性重构** · 仓库改为 pnpm workspace 三段式 + `@aitools` scope 统一命名（REFACTOR-001 PR-1）
+
+### 包命名变更
+
+- `aitools-cli` → **`@aitools/cli`**（npm 包名；命令名 `aitools` 不变）
+- `aiflux-desktop` → **`@aitools/desktop`**（private）
+- 仓库根 shared 目录升格为 workspace 包 **`@aitools/shared`**（private）
+- 仓库根 package 改名为 `aitools-workspace`（伞包，private）
+
+### 仓库结构
+
+```
+packages/
+├── cli/        → @aitools/cli
+├── desktop/    → @aitools/desktop
+└── shared/     → @aitools/shared（内含 tools.json SSOT + tools.schema.ts）
+```
+
+### 新增开发约束
+
+- **必须使用 pnpm**（workspace protocol 要求）——根 `package.json.preinstall` 强制
+- 最低要求：Node.js ≥ 20.0.0、pnpm ≥ 9.0.0
+
+### 用户影响
+
+- **CLI 用户**：无可感知变化，命令行 `aitools` 行为完全一致
+- **GUI 用户**：无可感知变化，所有功能 1:1 保持
+- **源码开发者**：`pnpm install` 一次装齐所有包，新路径见 [`CODEBUDDY.md`](./CODEBUDDY.md)
+
+### 未变更
+
+- 业务逻辑（命令、同步、迁移）0 改动
+- 测试：186 用例全绿
+- SSOT 数据结构（`tools.json`）内容与 schema 不变
+
+### 后续
+
+PR-2 将把 shared 的引用方式从"相对路径 + Vite alias"统一改为 `import from '@aitools/shared'` workspace 包引用。
+
+---
+
 ## [0.4.2] - 2026-04-28
 
 > **非破坏** · CLI 补 target enable/disable 命令（RFC-001 的 patch）

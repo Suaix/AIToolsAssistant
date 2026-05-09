@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 
 # ============================================================
-# aitools-cli 一键安装脚本
+# @aitools/cli 一键安装脚本
 # 功能：安装依赖 → 编译构建 → 全局链接
 # 执行完成后可在任何目录使用 aitools 命令
+#
+# REFACTOR-001：仓库结构改为 pnpm workspace 三段式，
+#   CLI 源码位于 packages/cli/，本脚本适配新路径
 # ============================================================
 
 set -e
@@ -26,12 +29,15 @@ step()    { echo -e "\n${BOLD}[$1/$TOTAL_STEPS] $2${RESET}"; }
 # ---------------------- 总步骤数 ----------------------
 TOTAL_STEPS=5
 
-# ---------------------- 切换到脚本所在目录 ----------------------
+# ---------------------- 切换到脚本所在目录（workspace 根） ----------------------
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
-echo -e "\n${BOLD}🚀 aitools-cli 一键安装${RESET}"
-echo -e "   项目目录: ${SCRIPT_DIR}\n"
+CLI_DIR="$SCRIPT_DIR/packages/cli"
+
+echo -e "\n${BOLD}🚀 @aitools/cli 一键安装${RESET}"
+echo -e "   workspace 根: ${SCRIPT_DIR}"
+echo -e "   CLI 包路径:  ${CLI_DIR}\n"
 
 # ---------------------- 步骤 1：检查 Node.js 版本 ----------------------
 step 1 "检查 Node.js 环境"
@@ -52,49 +58,53 @@ fi
 
 success "Node.js v${NODE_VERSION}"
 
-# ---------------------- 步骤 2：检测包管理器 ----------------------
+# ---------------------- 步骤 2：检测包管理器（workspace 要求 pnpm） ----------------------
 step 2 "检测包管理器"
 
-# 优先使用 pnpm，其次 npm
-if command -v pnpm &> /dev/null; then
-    PM="pnpm"
-    PM_VERSION=$(pnpm -v)
-    success "使用 pnpm v${PM_VERSION}"
-elif command -v npm &> /dev/null; then
-    PM="npm"
-    PM_VERSION=$(npm -v)
-    warn "未检测到 pnpm，使用 npm v${PM_VERSION}（推荐安装 pnpm 以获得更好体验）"
-else
-    error "未检测到 pnpm 或 npm，请先安装包管理器"
+if ! command -v pnpm &> /dev/null; then
+    error "未检测到 pnpm（本仓库为 pnpm workspace，必须用 pnpm）"
+    error "安装命令: npm install -g pnpm"
+    error "或查看: https://pnpm.io/installation"
     exit 1
 fi
 
-# ---------------------- 步骤 3：安装依赖 ----------------------
-step 3 "安装项目依赖"
+PM_VERSION=$(pnpm -v)
+PM_MAJOR=$(echo "$PM_VERSION" | cut -d. -f1)
 
-$PM install
+if [ "$PM_MAJOR" -lt 9 ]; then
+    warn "pnpm 版本 v${PM_VERSION} 可能过旧（推荐 >= 9.0.0）"
+else
+    success "pnpm v${PM_VERSION}"
+fi
+
+# ---------------------- 步骤 3：安装 workspace 依赖 ----------------------
+step 3 "安装 workspace 依赖（pnpm 会自动装齐所有包）"
+
+pnpm install
 success "依赖安装完成"
 
-# ---------------------- 步骤 4：编译构建 ----------------------
-step 4 "编译 TypeScript → dist/"
+# ---------------------- 步骤 4：编译 CLI ----------------------
+step 4 "编译 @aitools/cli → packages/cli/dist/"
 
-$PM run build
+pnpm -F @aitools/cli build
 success "编译构建完成"
 
 # ---------------------- 步骤 5：全局链接 ----------------------
 step 5 "注册全局命令 aitools"
 
 # 确保构建产物有执行权限
-chmod +x dist/index.js
+chmod +x "$CLI_DIR/dist/index.js"
 
-if [ "$PM" = "pnpm" ]; then
-    pnpm link --global 2>/dev/null || {
-        warn "pnpm link --global 失败，尝试使用 npm link..."
-        npm link
-    }
-else
+# 在 CLI 包目录内执行 link，确保链接的是 @aitools/cli 这个包
+cd "$CLI_DIR"
+
+pnpm link --global 2>/dev/null || {
+    warn "pnpm link --global 失败，尝试使用 npm link..."
     npm link
-fi
+}
+
+# 回到 workspace 根
+cd "$SCRIPT_DIR"
 
 success "全局链接完成"
 

@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 
 # ============================================================
-# aitools-cli 卸载脚本
+# @aitools/cli 卸载脚本
 # 功能：移除全局命令 → 清理构建产物与依赖 → (可选) 清理配置与源目录
+#
+# REFACTOR-001：适配 pnpm workspace 三段式结构，
+#   CLI 产物在 packages/cli/dist、workspace 依赖在根 node_modules + packages/*/node_modules
 # ============================================================
 
 set -u
@@ -28,8 +31,10 @@ cd "$SCRIPT_DIR"
 
 TOTAL_STEPS=4
 
-echo -e "\n${BOLD}🗑️  aitools-cli 卸载${RESET}"
-echo -e "   项目目录: ${SCRIPT_DIR}\n"
+echo -e "\n${BOLD}🗑️  @aitools/cli 卸载${RESET}"
+echo -e "   workspace 根: ${SCRIPT_DIR}\n"
+
+CLI_DIR="$SCRIPT_DIR/packages/cli"
 
 # ---------------------- 通用工具函数 ----------------------
 
@@ -89,14 +94,24 @@ if [ -z "$PM" ]; then
     warn "未检测到 pnpm/npm，跳过 unlink（全局命令可能不存在）"
 else
     info "使用 ${PM} 进行解除链接"
-    # 先尝试在项目目录执行 unlink（pnpm 要求在包目录内）
+    # pnpm unlink 要求在包目录内执行（链接的是 @aitools/cli）
     if [ "$PM" = "pnpm" ]; then
-        pnpm unlink --global 2>/dev/null \
-            || pnpm unlink 2>/dev/null \
-            || npm unlink -g aitools-cli 2>/dev/null \
-            || warn "pnpm/npm unlink 未成功，可能命令已不存在"
+        if [ -d "$CLI_DIR" ]; then
+            (cd "$CLI_DIR" && pnpm unlink --global 2>/dev/null) \
+                || (cd "$CLI_DIR" && pnpm unlink 2>/dev/null) \
+                || npm unlink -g @aitools/cli 2>/dev/null \
+                || npm unlink -g aitools-cli 2>/dev/null \
+                || warn "pnpm/npm unlink 未成功，可能命令已不存在"
+        else
+            warn "CLI 包目录不存在: ${CLI_DIR}，尝试 npm unlink"
+            npm unlink -g @aitools/cli 2>/dev/null \
+                || npm unlink -g aitools-cli 2>/dev/null \
+                || warn "npm unlink 未成功，可能命令已不存在"
+        fi
     else
-        npm unlink -g aitools-cli 2>/dev/null \
+        # 同时兼容新旧两个包名（@aitools/cli 与历史 aitools-cli）
+        npm unlink -g @aitools/cli 2>/dev/null \
+            || npm unlink -g aitools-cli 2>/dev/null \
             || warn "npm unlink -g 未成功，可能命令已不存在"
     fi
 
@@ -112,8 +127,14 @@ fi
 # ---------------------- 步骤 2：清理构建产物与依赖 ----------------------
 step 2 "清理构建产物与依赖"
 
-safe_rm_dir "$SCRIPT_DIR/dist" "dist 目录"
-safe_rm_dir "$SCRIPT_DIR/node_modules" "node_modules 目录"
+# workspace 产物：各包自己的 dist 与 node_modules
+safe_rm_dir "$CLI_DIR/dist" "CLI dist 目录"
+safe_rm_dir "$CLI_DIR/node_modules" "CLI node_modules 目录"
+safe_rm_dir "$SCRIPT_DIR/packages/desktop/dist" "desktop dist 目录"
+safe_rm_dir "$SCRIPT_DIR/packages/desktop/node_modules" "desktop node_modules 目录"
+safe_rm_dir "$SCRIPT_DIR/packages/shared/node_modules" "shared node_modules 目录"
+# 根依赖
+safe_rm_dir "$SCRIPT_DIR/node_modules" "workspace 根 node_modules 目录"
 
 # ---------------------- 步骤 3：询问是否清理 ~/.aitools ----------------------
 step 3 "清理用户配置目录"

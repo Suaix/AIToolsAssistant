@@ -16,9 +16,9 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
-      '@design-system': path.resolve(__dirname, '../docs/design-system'),
-      /* FEAT-005：跨包共享的 SSOT（仓库根 shared/） */
-      '@shared': path.resolve(__dirname, '../shared'),
+      '@design-system': path.resolve(__dirname, '../../docs/design-system'),
+      /* FEAT-005：跨包共享的 SSOT（workspace 根 packages/shared/src/） */
+      '@shared': path.resolve(__dirname, '../shared/src'),
     },
   },
 
@@ -26,9 +26,9 @@ export default defineConfig({
   server: {
     port: 1420,
     strictPort: true,
-    /* 允许 Vite 访问 docs/design-system（位于项目根，非 desktop 子目录） */
+    /* 允许 Vite 访问 docs/design-system（位于 workspace 根，非 packages/desktop 子目录） */
     fs: {
-      allow: [path.resolve(__dirname, '..')],
+      allow: [path.resolve(__dirname, '../..')],
     },
   },
 

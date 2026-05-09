@@ -1,5 +1,5 @@
 {
-  "name": "aiflux-desktop",
+  "name": "@aitools/desktop",
   "version": "0.1.0",
   "description": "AIToolsAssistant 桌面应用 · 你写一次，它到处都在",
   "type": "module",
@@ -13,6 +13,7 @@
     "tauri:build": "tauri build"
   },
   "dependencies": {
+    "@aitools/shared": "workspace:*",
     "@tauri-apps/api": "^2.0.0",
     "lucide-react": "^0.454.0",
     "react": "^18.3.1",
