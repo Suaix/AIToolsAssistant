@@ -20,13 +20,13 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
 
-    /* Path alias：@/* 指向 src/*；@design-system/* 指向设计系统源；@shared/* 指向 SSOT */
+    /* Path alias：@/* 指向 src/*；@design-system/* 指向设计系统源 */
+    /* REFACTOR-001 PR-2：@shared/* paths 已下线，统一通过 @aitools/shared workspace 包引用 */
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
-      "@design-system/*": ["../../docs/design-system/*"],
-      "@shared/*": ["../shared/src/*"]
+      "@design-system/*": ["../../docs/design-system/*"]
     }
   },
-  "include": ["src", "../shared/src/**/*.ts"]
+  "include": ["src"]
 }

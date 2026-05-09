@@ -1,85 +1,30 @@
 /**
- * AI 工具注册表 CLI 适配层（FEAT-005 SSOT）
+ * AI 工具注册表 CLI 适配层（FEAT-005 SSOT / REFACTOR-001 PR-2）
  *
  * 职责：
- *   1. 加载 shared/tools.json（仓库根的 Single Source of Truth）
- *   2. 提供强类型的查询函数，供 commands/init.ts、commands/target.ts、commands/list.ts、
+ *   1. 从 @aitools/shared workspace 包导入 SSOT 数据（编译期 inline）
+ *   2. 对导入数据做运行时校验（防御构建/打包事故）
+ *   3. 提供强类型的查询函数，供 commands/init.ts、commands/target.ts、commands/list.ts、
  *      config/manager.ts、config/migrations/ 等消费
  *
- * 加载策略（FEAT-005 TD-1）：
- *   - 不使用 import attributes（避免对 Node 22 硬依赖；当前 engines.node ≥20）
- *   - 改为运行时 readFileSync，路径相对于本文件
- *   - 模块级缓存：进程内仅读一次
+ * 加载策略（REFACTOR-001 PR-2 重写）：
+ *   - 直接从 @aitools/shared 导入 TOOLS 常量（tsup bundle 编译期 inline）
+ *   - 不再使用 fs.readFileSync + 多候选路径探测
+ *   - 产物体积：shared/tools.json 的内容被内联进 dist/index.js，无独立文件
  *
- * 路径解析：
- *   - 源码态：<repo>/src/registry/tools.ts → ../../shared/tools.json
- *   - 构建态：<install>/dist/registry/tools.js → ../../shared/tools.json
- *     （tsup 默认保留相对结构；package.json:files 包含 shared/ 才能在全局安装后找到）
- *
- * 类型约定：
- *   本文件 import shared/tools.schema.ts 仅作类型导入（type-only），
- *   实际编译产物不含跨 rootDir 引用（tsup bundle 后只剩本地常量）。
+ * 与 FEAT-005 实现的差异：
+ *   FEAT-005：运行时 readFileSync(resolveRegistryPath()) + 三候选 fallback
+ *   REFACTOR-001 PR-2：编译期 import，零运行时 IO，路径解析标准化
  */
 
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import type {
-  ToolDefinition,
-  ToolsRegistry,
-} from '../../../shared/src/tools.schema.js';
+import { TOOLS, type ToolDefinition, type ToolsRegistry } from '@aitools/shared';
 
 /* ============================================================
- * 模块级常量
+ * 运行时校验
  * ============================================================ */
 
-/** 本模块所在目录的绝对路径（兼容源码态与构建态） */
-const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
-
 /**
- * 解析 SSOT JSON 文件的绝对路径
- *
- * 路径策略（PR-1 阶段：兼容 workspace 结构下的源码态与构建态）：
- *   - 源码态：packages/cli/src/registry/tools.ts
- *     → 向上三级到 workspace 根，再到 packages/shared/src/tools.json
- *   - bundle 态：packages/cli/dist/index.js
- *     → 向上两级到 packages/，再到 shared/src/tools.json
- *   - 全局安装态：<install>/dist/index.js
- *     → 向上一级 <install>/shared/tools.json（npm publish 时 tsup 会把 shared 合入，
- *       PR-2 改为 import 后此态消失）
- *
- * 实现：依次尝试候选路径，取第一个真实存在的。
- *
- * @returns 绝对路径
- * @throws 所有候选都不存在时抛错（构建/打包事故）
- */
-function resolveRegistryPath(): string {
-  const candidates = [
-    /* 源码态：packages/cli/src/registry/ → workspace 根 packages/shared/src/（向上三级到 packages/ 再下潜） */
-    path.resolve(MODULE_DIR, '..', '..', '..', 'shared', 'src', 'tools.json'),
-    /* bundle 态：packages/cli/dist/ → packages/shared/src/（向上两级） */
-    path.resolve(MODULE_DIR, '..', '..', 'shared', 'src', 'tools.json'),
-    /* 全局安装态（PR-2 后废弃）：<install>/dist/ → <install>/shared/tools.json */
-    path.resolve(MODULE_DIR, '..', 'shared', 'tools.json'),
-  ];
-  for (const candidate of candidates) {
-    try {
-      readFileSync(candidate);
-      return candidate;
-    } catch {
-      /* 尝试下一候选 */
-    }
-  }
-  throw new Error(
-    `SSOT 注册表 tools.json 未找到。已尝试：${candidates.join(', ')}`,
-  );
-}
-
-/** SSOT JSON 文件的绝对路径 */
-const REGISTRY_PATH = resolveRegistryPath();
-
-/**
- * 加载并校验 SSOT 注册表
+ * 校验 SSOT 注册表结构
  *
  * 校验规则：
  *   - 必须是 object
@@ -89,64 +34,62 @@ const REGISTRY_PATH = resolveRegistryPath();
  *
  * 任何校验失败都抛出明确错误（视为构建/打包事故，而非用户错误）。
  *
- * @returns 校验后的 ToolsRegistry
+ * @param registry 从 @aitools/shared 导入的注册表
+ * @returns 同一对象（校验通过后直接返回，避免拷贝）
+ * @throws 任何字段不合规时抛出
  */
-function loadRegistry(): ToolsRegistry {
-  const raw = readFileSync(REGISTRY_PATH, 'utf-8');
-  const parsed = JSON.parse(raw) as unknown;
-
-  if (!parsed || typeof parsed !== 'object') {
-    throw new Error(`SSOT 注册表格式错误：${REGISTRY_PATH} 不是有效的 JSON 对象`);
+function validateRegistry(registry: ToolsRegistry): ToolsRegistry {
+  if (!registry || typeof registry !== 'object') {
+    throw new Error('SSOT 注册表格式错误：@aitools/shared 导出的 TOOLS 不是有效的对象');
   }
 
-  const obj = parsed as Record<string, unknown>;
-
-  if (typeof obj.schemaVersion !== 'number') {
+  if (typeof registry.schemaVersion !== 'number') {
     throw new Error('SSOT 注册表缺少有效的 schemaVersion 字段');
   }
 
-  if (!Array.isArray(obj.tools)) {
+  if (!Array.isArray(registry.tools)) {
     throw new Error('SSOT 注册表缺少有效的 tools 数组');
   }
 
   /* 逐项校验 ToolDefinition 必需字段 */
-  for (const tool of obj.tools) {
+  for (const tool of registry.tools) {
     if (!tool || typeof tool !== 'object') {
       throw new Error('SSOT 注册表 tools 数组中存在非对象项');
     }
-    const t = tool as Record<string, unknown>;
-    if (typeof t.name !== 'string' || t.name.length === 0) {
+    if (typeof tool.name !== 'string' || tool.name.length === 0) {
       throw new Error('SSOT 工具项缺少有效的 name 字段');
     }
-    if (typeof t.displayName !== 'string' || t.displayName.length === 0) {
-      throw new Error(`SSOT 工具项 ${t.name} 缺少有效的 displayName`);
+    if (typeof tool.displayName !== 'string' || tool.displayName.length === 0) {
+      throw new Error(`SSOT 工具项 ${tool.name} 缺少有效的 displayName`);
     }
-    if (typeof t.userBase !== 'string' || t.userBase.length === 0) {
-      throw new Error(`SSOT 工具项 ${t.name} 缺少有效的 userBase`);
+    if (typeof tool.userBase !== 'string' || tool.userBase.length === 0) {
+      throw new Error(`SSOT 工具项 ${tool.name} 缺少有效的 userBase`);
     }
-    if (!Array.isArray(t.projectDirAliases) || t.projectDirAliases.length === 0) {
-      throw new Error(`SSOT 工具项 ${t.name} 缺少有效的 projectDirAliases`);
+    if (!Array.isArray(tool.projectDirAliases) || tool.projectDirAliases.length === 0) {
+      throw new Error(`SSOT 工具项 ${tool.name} 缺少有效的 projectDirAliases`);
     }
-    if (typeof t.defaultEnabled !== 'boolean') {
-      throw new Error(`SSOT 工具项 ${t.name} 缺少有效的 defaultEnabled`);
+    if (typeof tool.defaultEnabled !== 'boolean') {
+      throw new Error(`SSOT 工具项 ${tool.name} 缺少有效的 defaultEnabled`);
     }
   }
 
   /* 校验 legacy 映射：必须是 object（可空） */
-  for (const key of ['legacyAliases', 'legacyUserBases', 'legacyProjectDirs'] as const) {
-    if (!obj[key] || typeof obj[key] !== 'object' || Array.isArray(obj[key])) {
+  const legacyKeys = ['legacyAliases', 'legacyUserBases', 'legacyProjectDirs'] as const;
+  for (const key of legacyKeys) {
+    const value = registry[key];
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
       throw new Error(`SSOT 注册表缺少有效的 ${key} 对象`);
     }
   }
 
-  return parsed as ToolsRegistry;
+  return registry;
 }
 
-/** 模块级缓存：进程内 SSOT 仅读一次 */
-const REGISTRY: ToolsRegistry = loadRegistry();
+/** 模块级缓存：进程内 SSOT 仅校验一次 */
+const REGISTRY: ToolsRegistry = validateRegistry(TOOLS);
 
 /* ============================================================
- * 公共查询 API
+ * 公共查询 API（签名保持与 FEAT-005 实现一致，消费方零改动）
  * ============================================================ */
 
 /**
@@ -183,7 +126,7 @@ export function getToolDisplayName(name: string): string {
 /**
  * 获取 init 命令的默认 enabled 工具集合
  *
- * 用途：替代 src/config/manager.ts:getDefaultTargets() 中的硬编码启用规则
+ * 用途：替代硬编码启用规则
  *
  * @returns defaultEnabled === true 的工具列表（保留 SSOT 声明顺序）
  */

@@ -17,8 +17,7 @@ export default defineConfig({
     alias: {
       '@': path.resolve(__dirname, './src'),
       '@design-system': path.resolve(__dirname, '../../docs/design-system'),
-      /* FEAT-005：跨包共享的 SSOT（workspace 根 packages/shared/src/） */
-      '@shared': path.resolve(__dirname, '../shared/src'),
+      /* REFACTOR-001 PR-2：@shared/* alias 已下线，统一通过 @aitools/shared workspace 包引用 */
     },
   },
 

@@ -7,16 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 
 ## [0.5.0] - 2026-05-09
 
-> **结构性重构** · 仓库改为 pnpm workspace 三段式 + `@aitools` scope 统一命名（REFACTOR-001 PR-1）
+> **结构性重构** · 仓库改为 pnpm workspace 三段式 + `@aitools` scope 统一命名（REFACTOR-001 PR-1 + PR-2）
 
-### 包命名变更
+### PR-1：物理搬迁 + workspace 骨架
+
+#### 包命名变更
 
 - `aitools-cli` → **`@aitools/cli`**（npm 包名；命令名 `aitools` 不变）
 - `aiflux-desktop` → **`@aitools/desktop`**（private）
 - 仓库根 shared 目录升格为 workspace 包 **`@aitools/shared`**（private）
 - 仓库根 package 改名为 `aitools-workspace`（伞包，private）
 
-### 仓库结构
+#### 仓库结构
 
 ```
 packages/
@@ -24,6 +26,26 @@ packages/
 ├── desktop/    → @aitools/desktop
 └── shared/     → @aitools/shared（内含 tools.json SSOT + tools.schema.ts）
 ```
+
+### PR-2：契约重写（workspace 引用收敛）
+
+#### 引用机制统一
+
+所有跨包引用从"相对路径 + Vite alias"**统一**为 `@aitools/shared` workspace 包：
+
+- CLI 侧删除 `resolveRegistryPath()` + `fs.readFileSync` + 多候选路径探测
+- desktop 侧删除 `@shared/*` Vite alias 与 `tsconfig paths`
+- 统一 import 形式：`import { TOOLS } from '@aitools/shared'`
+
+#### 产物体积
+
+- CLI npm 包从含独立 `shared/` 目录，**收敛为 `dist/` + 元信息 5 个文件**
+- `dist/index.js` 50.72 KB（shared 内容已 tsup 编译期 inline）
+
+#### tsup 配置
+
+- 新增 `noExternal: ['@aitools/shared']` 强制 bundle workspace 包
+  （否则 Node 原生会尝试 external resolve 到 `.ts` 源码导致 `ERR_UNKNOWN_FILE_EXTENSION`）
 
 ### 新增开发约束
 
@@ -41,10 +63,6 @@ packages/
 - 业务逻辑（命令、同步、迁移）0 改动
 - 测试：186 用例全绿
 - SSOT 数据结构（`tools.json`）内容与 schema 不变
-
-### 后续
-
-PR-2 将把 shared 的引用方式从"相对路径 + Vite alias"统一改为 `import from '@aitools/shared'` workspace 包引用。
 
 ---
 

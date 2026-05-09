@@ -1,21 +1,21 @@
 /**
- * 工具元数据与项目工具探测（FEAT-005 SSOT 接入）
+ * 工具元数据与项目工具探测（FEAT-005 SSOT 接入 / REFACTOR-001 PR-2 统一引用）
  *
  * 职责：
- *   作为前端"工具"概念的薄类型适配层，实际数据全部来自 SSOT（shared/tools.json）。
+ *   作为前端"工具"概念的薄类型适配层，实际数据全部来自 SSOT（@aitools/shared）。
  *   不再硬编码工具列表 / 显示名 / 项目目录别名。
  *
  * 历史变更：
  *   FEAT-004：本文件维护 AVAILABLE_TOOLS / TOOL_PROJECT_DIR_ALIASES / TOOL_DISPLAY_NAME 三套硬编码
  *   FEAT-005：删除全部硬编码，改为 import @shared/tools.json；下线 TOOL_PROJECT_DIR_ALIASES
  *             双名映射（迁移管线已把 .claude-code 改写为 .claude-internal，无需运行时兼容）
+ *   REFACTOR-001 PR-2：@shared/* Vite alias 统一收敛为 @aitools/shared workspace 包引用
  */
 
-import toolsJson from '@shared/tools.json';
-import type {
-  ToolDefinition as SsotToolDefinition,
-  ToolsRegistry,
-} from '@shared/tools.schema';
+import {
+  TOOLS,
+  type ToolDefinition as SsotToolDefinition,
+} from '@aitools/shared';
 
 /* ============================================================
  * 类型适配层（保留前端原有 ToolDefinition 字段命名风格）
@@ -35,16 +35,13 @@ export interface ToolDefinition {
  * 强类型 SSOT 引用 + 派生数据
  * ============================================================ */
 
-/** 已加载的 SSOT 注册表（编译期 inline，运行时零开销） */
-const REGISTRY: ToolsRegistry = toolsJson as ToolsRegistry;
-
 /**
  * 预定义可连接工具列表
  *
- * 来源：shared/tools.json
+ * 来源：@aitools/shared（tools.json 编译期 inline）
  * 顺序：保持 SSOT 中的声明顺序（影响 GUI AddToolModal 选项顺序）
  */
-export const AVAILABLE_TOOLS: ToolDefinition[] = REGISTRY.tools.map(
+export const AVAILABLE_TOOLS: ToolDefinition[] = TOOLS.tools.map(
   (t: SsotToolDefinition) => ({
     name: t.name,
     displayName: t.displayName,
@@ -60,7 +57,7 @@ export const AVAILABLE_TOOLS: ToolDefinition[] = REGISTRY.tools.map(
  */
 export const TOOL_PROJECT_DIR_ALIASES: Record<string, string[]> =
   Object.fromEntries(
-    REGISTRY.tools.map((t: SsotToolDefinition) => [t.name, t.projectDirAliases]),
+    TOOLS.tools.map((t: SsotToolDefinition) => [t.name, t.projectDirAliases]),
   );
 
 /**
@@ -74,7 +71,7 @@ export const TOOL_PROJECT_DIR_ALIASES: Record<string, string[]> =
  */
 export const TOOL_DISPLAY_NAME: Record<string, string> = {
   ...Object.fromEntries(
-    REGISTRY.tools.map((t: SsotToolDefinition) => [t.name, t.displayName]),
+    TOOLS.tools.map((t: SsotToolDefinition) => [t.name, t.displayName]),
   ),
   /* 兼容性：Tools 页历史上还展示过 cursor，本表保留以避免回归 */
   cursor: 'Cursor',
