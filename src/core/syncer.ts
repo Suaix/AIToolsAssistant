@@ -12,6 +12,7 @@ import { hashDirectory, hashDirectorySafe } from './hasher.js';
 import { expandTilde } from '../config/manager.js';
 import { getHandler } from './resources/registry.js';
 import { logger } from '../utils/logger.js';
+import { getToolDisplayName } from '../registry/tools.js';
 import type {
   Config,
   Target,
@@ -87,16 +88,34 @@ export function getProjectTargetDir(
 
 /**
  * 将单个资源同步到单个目标（基于 hash 对比）
+ *
+ * FEAT-005 US-6：进入 mkdir 前必须先断言 AI 工具家目录存在，否则跳过该 target，
+ * 避免 aitools 越权创建 ~/.codebuddy、~/.claude-internal 等不属于自己的目录。
+ *
+ * targetBaseDir 形如 `<homeDir>/<resourceTypeDir>`（如 ~/.codebuddy/skills），
+ * 其父目录 `<homeDir>` 必须已存在；不存在时返回 'skipped_missing_tool'。
+ *
  * @param resource 资源元数据
  * @param targetBaseDir 目标基础目录绝对路径
  * @param targetName 目标工具名称（用于返回结果）
- * @returns 同步结果（动作类型：created / updated / skipped）
+ * @returns 同步结果（动作类型：created / updated / skipped / skipped_missing_tool）
  */
 async function syncResourceToDir(
   resource: ResourceInfo,
   targetBaseDir: string,
   targetName: string,
 ): Promise<SkillTargetSyncResult> {
+  /* US-6 守卫：targetBaseDir 的父目录是 AI 工具家目录（用户级 user_base 或项目级 .<tool>） */
+  const toolHomeDir = path.dirname(targetBaseDir);
+  const toolHomeExists = await pathExistsAsDir(toolHomeDir);
+  if (!toolHomeExists) {
+    return {
+      targetName,
+      action: 'skipped_missing_tool',
+      expectedPath: toolHomeDir,
+    };
+  }
+
   const targetResourceDir = path.join(targetBaseDir, resource.dirName);
 
   /* 计算源目录 hash */
@@ -110,7 +129,8 @@ async function syncResourceToDir(
     return { targetName, action: 'skipped' };
   }
 
-  /* 确保目标基础目录存在 */
+  /* 确保目标基础目录存在（仅创建 <toolHome>/<resourceType>/ 这一层；
+     前置守卫保证不会越权创建 toolHomeDir 自身） */
   await fs.mkdir(targetBaseDir, { recursive: true });
 
   /* 执行全量拷贝 */
@@ -121,6 +141,24 @@ async function syncResourceToDir(
   return { targetName, action };
 }
 
+/**
+ * 检查路径是否存在且是目录
+ *
+ * 复用本文件场景的小工具，避免引入更多依赖；
+ * 与 src/utils/tool-home-assert.ts 同语义但使用直接 fs.stat。
+ *
+ * @param targetPath 待检测的绝对路径
+ * @returns true 表示存在且是目录
+ */
+async function pathExistsAsDir(targetPath: string): Promise<boolean> {
+  try {
+    const stat = await fs.stat(targetPath);
+    return stat.isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 /* ============================================================
  * v0.4.0：任务驱动同步引擎
  * 消费订阅展开后的 ExpandedTask[]，对每条任务做 hash 比对 + 按需拷贝
@@ -129,18 +167,22 @@ async function syncResourceToDir(
 /**
  * ExpandedTask 级别的进度事件（syncTasks 内部专用）
  * 包含完整 `location` 信息，供 CLI 层转成 v0.4 SyncProgressData
+ *
+ * FEAT-005：action 新增 'skipped_missing_tool'
  */
 export interface TaskProgressEvent {
   /** 对应的 ExpandedTask（含 resource/target/location） */
   task: ExpandedTask;
-  /** 动作：created / updated / skipped / failed */
-  action: 'created' | 'updated' | 'skipped' | 'failed';
+  /** 动作 */
+  action: 'created' | 'updated' | 'skipped' | 'skipped_missing_tool' | 'failed';
   /** 当前进度（1-based） */
   index: number;
   /** 总任务数 */
   total: number;
   /** 若 action === 'failed'，此处给出原因 */
   error?: string;
+  /** action === 'skipped_missing_tool' 时携带预期路径 */
+  expectedPath?: string;
 }
 
 /** 任务进度回调 */
@@ -149,6 +191,8 @@ export type TaskProgressCallback = (event: TaskProgressEvent) => void;
 /**
  * 一批任务的执行结果
  * 聚合该批次内所有 ExpandedTask 的同步动作统计
+ *
+ * FEAT-005：新增 skippedMissingTool 计数
  */
 export interface TasksSummary {
   /** 总任务数 */
@@ -159,6 +203,8 @@ export interface TasksSummary {
   updated: number;
   /** 跳过数 */
   skipped: number;
+  /** 跳过数（AI 工具未安装；US-6 守卫触发） */
+  skippedMissingTool: number;
   /** 失败数 */
   failed: number;
 }
@@ -184,6 +230,7 @@ export async function syncTasks(
     created: 0,
     updated: 0,
     skipped: 0,
+    skippedMissingTool: 0,
     failed: 0,
   };
 
@@ -207,6 +254,12 @@ export async function syncTasks(
         summary.created++;
       } else if (result.action === 'updated') {
         summary.updated++;
+      } else if (result.action === 'skipped_missing_tool') {
+        summary.skippedMissingTool++;
+        /* US-6：单独 logger.warn 提示用户该工具未安装（人类可读） */
+        logger.warn(
+          `跳过 ${task.target.name}：未检测到该工具（${result.expectedPath} 不存在）`,
+        );
       } else {
         summary.skipped++;
       }
@@ -216,6 +269,7 @@ export async function syncTasks(
         action: result.action,
         index,
         total: tasks.length,
+        ...(result.expectedPath ? { expectedPath: result.expectedPath } : {}),
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -269,6 +323,7 @@ export async function syncAllResources(
   let created = 0;
   let updated = 0;
   let skipped = 0;
+  let skippedMissingTool = 0;
 
   /* 计算总任务数（resource × target），用于 onProgress 的 index/total */
   const totalTasks = resources.length * targets.length;
@@ -291,6 +346,12 @@ export async function syncAllResources(
           created++;
         } else if (result.action === 'updated') {
           updated++;
+        } else if (result.action === 'skipped_missing_tool') {
+          skippedMissingTool++;
+          /* US-6 守卫触发：单独提示用户 */
+          logger.warn(
+            `跳过 ${getToolDisplayName(target.name)}：未检测到该工具（${result.expectedPath} 不存在）`,
+          );
         } else {
           skipped++;
         }
@@ -340,6 +401,7 @@ export async function syncAllResources(
     created,
     updated,
     skipped,
+    skippedMissingTool,
     results,
   };
 }
@@ -355,6 +417,7 @@ function emptySummary(total: number): SyncSummary {
     created: 0,
     updated: 0,
     skipped: 0,
+    skippedMissingTool: 0,
     results: [],
   };
 }
@@ -438,6 +501,7 @@ export async function syncProjectResources(
   let created = 0;
   let updated = 0;
   let skipped = 0;
+  let skippedMissingTool = 0;
 
   /* 计算总任务数与进度计数器 */
   const totalTasks = resources.length * targets.length;
@@ -460,6 +524,11 @@ export async function syncProjectResources(
           created++;
         } else if (result.action === 'updated') {
           updated++;
+        } else if (result.action === 'skipped_missing_tool') {
+          skippedMissingTool++;
+          logger.warn(
+            `跳过 ${getToolDisplayName(target.name)}：项目未关联该工具（${result.expectedPath} 不存在）`,
+          );
         } else {
           skipped++;
         }
@@ -511,6 +580,7 @@ export async function syncProjectResources(
     created,
     updated,
     skipped,
+    skippedMissingTool,
     results,
   };
 }

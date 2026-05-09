@@ -43,6 +43,9 @@ async function setupFakeEnv(skillNames: string[] = []): Promise<void> {
     await fs.writeFile(path.join(dir, 'SKILL.md'), `# ${name}`, 'utf-8');
   }
 
+  /* FEAT-005 US-6：预创建 ~/.codebuddy 模拟"用户已安装 CodeBuddy" */
+  await fs.mkdir(path.join(fakeHome, '.codebuddy'), { recursive: true });
+
   /* 写入一个合法的 v0.4 config.yaml */
   const cfg = createConfig('~/.aitools', [
     {

@@ -41,7 +41,7 @@ let originalStdoutWrite: typeof process.stdout.write;
 /**
  * 安装一个双 target 的最小配置
  * - codebuddy: enabled=true
- * - claude-code: enabled=false
+ * - claude-internal: enabled=false
  * 方便用 enable/disable 覆盖"翻转"与"幂等"四象限
  */
 async function setupTwoTargets(): Promise<void> {
@@ -52,7 +52,7 @@ async function setupTwoTargets(): Promise<void> {
       user_base: path.join(fakeHome, '.codebuddy'),
     },
     {
-      name: 'claude-code',
+      name: 'claude-internal',
       enabled: false,
       user_base: path.join(fakeHome, '.claude'),
     },
@@ -103,16 +103,16 @@ describe('targetEnableCommand · 翻转与幂等', () => {
   it('启用已禁用的 target → enabled 变 true，落盘，JSON 事件 changed=true', async () => {
     await setupTwoTargets();
 
-    await targetEnableCommand('claude-code');
+    await targetEnableCommand('claude-internal');
 
     const cfg = await loadConfig();
-    const claude = cfg?.targets.find((t) => t.name === 'claude-code');
+    const claude = cfg?.targets.find((t) => t.name === 'claude-internal');
     expect(claude?.enabled).toBe(true);
 
     const events = parseEvents();
     expect(events).toContainEqual({
       event: 'target.enabled',
-      data: { name: 'claude-code', changed: true },
+      data: { name: 'claude-internal', changed: true },
     });
     expect(events).toContainEqual({
       event: 'done',
@@ -169,16 +169,16 @@ describe('targetDisableCommand · 翻转与幂等', () => {
   it('禁用已禁用的 target → 幂等，不翻转', async () => {
     await setupTwoTargets();
 
-    await targetDisableCommand('claude-code');
+    await targetDisableCommand('claude-internal');
 
     const cfg = await loadConfig();
-    const claude = cfg?.targets.find((t) => t.name === 'claude-code');
+    const claude = cfg?.targets.find((t) => t.name === 'claude-internal');
     expect(claude?.enabled).toBe(false);
 
     const events = parseEvents();
     expect(events).toContainEqual({
       event: 'target.disabled',
-      data: { name: 'claude-code', changed: false },
+      data: { name: 'claude-internal', changed: false },
     });
     expect(events).toContainEqual({
       event: 'done',
@@ -195,11 +195,11 @@ describe('targetEnableCommand · 副作用最小化', () => {
   it('翻转一个 target 不影响其他 target 的 enabled 状态', async () => {
     await setupTwoTargets();
 
-    await targetEnableCommand('claude-code');
+    await targetEnableCommand('claude-internal');
 
     const cfg = await loadConfig();
     const codebuddy = cfg?.targets.find((t) => t.name === 'codebuddy');
-    const claude = cfg?.targets.find((t) => t.name === 'claude-code');
+    const claude = cfg?.targets.find((t) => t.name === 'claude-internal');
     expect(codebuddy?.enabled).toBe(true); // 维持原状
     expect(claude?.enabled).toBe(true); // 被本次操作翻转
   });
@@ -220,7 +220,7 @@ describe('targetEnableCommand · 未知 target', () => {
     expect(cfg?.targets.find((t) => t.name === 'codebuddy')?.enabled).toBe(
       true,
     );
-    expect(cfg?.targets.find((t) => t.name === 'claude-code')?.enabled).toBe(
+    expect(cfg?.targets.find((t) => t.name === 'claude-internal')?.enabled).toBe(
       false,
     );
 

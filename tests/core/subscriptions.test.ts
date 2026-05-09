@@ -39,11 +39,11 @@ function makeResource(dirName: string): ResourceInfo {
   };
 }
 
-/** 标准测试 target 集合（codebuddy 启用 + claude-code 启用） */
+/** 标准测试 target 集合（codebuddy 启用 + claude-internal 启用） */
 function makeTargets(): Target[] {
   return [
     { name: 'codebuddy', enabled: true, user_base: '/home/u/.codebuddy' },
-    { name: 'claude-code', enabled: true, user_base: '/home/u/.claude' },
+    { name: 'claude-internal', enabled: true, user_base: '/home/u/.claude-internal' },
   ];
 }
 
@@ -67,7 +67,7 @@ describe('resolveTargetPath', () => {
       projectDir: '/home/u/workspace/my-app',
     };
     const p = resolveTargetPath('skills', resource, location, targets[1]);
-    expect(p).toBe('/home/u/workspace/my-app/.claude-code/skills/brand-guidelines');
+    expect(p).toBe('/home/u/workspace/my-app/.claude-internal/skills/brand-guidelines');
   });
 
   it('project scope 缺 projectDir → 抛错（避免静默错误）', () => {
@@ -205,11 +205,11 @@ describe('expandSubscriptions', () => {
       enabledTargets: makeTargets(),
       userSubscriptions: ['brand-guidelines'],
       projectContext: null,
-      targetFilter: 'claude-code',
+      targetFilter: 'claude-internal',
     });
 
     expect(result.tasks).toHaveLength(1);
-    expect(result.tasks[0].target.name).toBe('claude-code');
+    expect(result.tasks[0].target.name).toBe('claude-internal');
   });
 
   it('scopeFilter=user 跳过 project 落点', () => {

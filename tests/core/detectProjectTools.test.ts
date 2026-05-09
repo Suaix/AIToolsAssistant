@@ -1,7 +1,7 @@
 /**
  * detectProjectTools() 函数单元测试
  * v0.2.0：项目级检测目录改为 .<targetName>/（不再使用硬编码映射）
- * 覆盖四种场景：仅 codebuddy、仅 claude-code、两个都有、都没有
+ * 覆盖四种场景：仅 codebuddy、仅 claude-internal、两个都有、都没有
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs/promises';
@@ -21,9 +21,9 @@ const testTargets: Target[] = [
     user_base: '~/.codebuddy',
   },
   {
-    name: 'claude-code',
+    name: 'claude-internal',
     enabled: true,
-    user_base: '~/.claude',
+    user_base: '~/.claude-internal',
   },
 ];
 
@@ -47,26 +47,26 @@ describe('detectProjectTools', () => {
     expect(result[0].name).toBe('codebuddy');
   });
 
-  it('仅存在 .claude-code/ 目录时，应只返回 claude-code 目标', async () => {
-    /* v0.2.0：项目级目录名 = .<targetName>（target.name=claude-code → .claude-code） */
-    await fs.mkdir(path.join(projectDir, '.claude-code'), { recursive: true });
+  it('仅存在 .claude-internal/ 目录时，应只返回 claude-internal 目标', async () => {
+    /* v0.2.0：项目级目录名 = .<targetName>（target.name=claude-internal → .claude-internal） */
+    await fs.mkdir(path.join(projectDir, '.claude-internal'), { recursive: true });
 
     const result = detectProjectTools(projectDir, testTargets);
 
     expect(result).toHaveLength(1);
-    expect(result[0].name).toBe('claude-code');
+    expect(result[0].name).toBe('claude-internal');
   });
 
   it('两个目录都存在时，应返回两个目标', async () => {
     await fs.mkdir(path.join(projectDir, '.codebuddy'), { recursive: true });
-    await fs.mkdir(path.join(projectDir, '.claude-code'), { recursive: true });
+    await fs.mkdir(path.join(projectDir, '.claude-internal'), { recursive: true });
 
     const result = detectProjectTools(projectDir, testTargets);
 
     expect(result).toHaveLength(2);
     const names = result.map((t) => t.name);
     expect(names).toContain('codebuddy');
-    expect(names).toContain('claude-code');
+    expect(names).toContain('claude-internal');
   });
 
   it('都不存在时，应返回空列表', () => {

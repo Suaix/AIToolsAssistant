@@ -56,7 +56,10 @@ beforeEach(async () => {
   await fs.mkdir(projectDir, { recursive: true });
   /* 为项目目录创建工具根目录，确保 detectProjectTools() 能检测到 */
   await fs.mkdir(path.join(projectDir, '.codebuddy'), { recursive: true });
-  await fs.mkdir(path.join(projectDir, '.claude-code'), { recursive: true });
+  await fs.mkdir(path.join(projectDir, '.claude-internal'), { recursive: true });
+  /* FEAT-005 US-6：预创建用户级 AI 工具家目录，模拟"用户已安装"场景 */
+  await fs.mkdir(path.join(userTargetDir, 'codebuddy'), { recursive: true });
+  await fs.mkdir(path.join(userTargetDir, 'claude-internal'), { recursive: true });
 });
 
 afterEach(async () => {
@@ -76,9 +79,9 @@ function createTestConfig(): Config {
         user_base: path.join(userTargetDir, 'codebuddy'),
       },
       {
-        name: 'claude-code',
+        name: 'claude-internal',
         enabled: true,
-        user_base: path.join(userTargetDir, 'claude-code'),
+        user_base: path.join(userTargetDir, 'claude-internal'),
       },
     ],
     sync: {
@@ -107,8 +110,8 @@ describe('getUserTargetDir / getProjectTargetDir', () => {
     expect(getProjectTargetDir('/work/proj', 'codebuddy', 'skills')).toBe(
       '/work/proj/.codebuddy/skills',
     );
-    expect(getProjectTargetDir('/work/proj', 'claude-code', 'agents')).toBe(
-      '/work/proj/.claude-code/agents',
+    expect(getProjectTargetDir('/work/proj', 'claude-internal', 'agents')).toBe(
+      '/work/proj/.claude-internal/agents',
     );
   });
 });
@@ -192,7 +195,7 @@ describe('syncProjectResources（项目级同步）', () => {
     expect(summary.created).toBe(2);
 
     const codebuddyDir = path.join(projectDir, '.codebuddy/skills/skill-b');
-    const claudeDir = path.join(projectDir, '.claude-code/skills/skill-b');
+    const claudeDir = path.join(projectDir, '.claude-internal/skills/skill-b');
 
     expect((await fs.stat(codebuddyDir)).isDirectory()).toBe(true);
     expect((await fs.stat(claudeDir)).isDirectory()).toBe(true);
@@ -240,12 +243,12 @@ describe('syncProjectResources（项目级同步）', () => {
       config,
       projectDir,
       'skills',
-      'claude-code',
+      'claude-internal',
     );
 
     expect(summary.created).toBe(1);
     expect(summary.results[0].targetResults).toHaveLength(1);
-    expect(summary.results[0].targetResults[0].targetName).toBe('claude-code');
+    expect(summary.results[0].targetResults[0].targetName).toBe('claude-internal');
   });
 
   it('仅存在一个工具目录时，应只同步到该工具', async () => {
@@ -254,7 +257,7 @@ describe('syncProjectResources（项目级同步）', () => {
     await fs.mkdir(path.join(singleToolProjectDir, '.codebuddy'), {
       recursive: true,
     });
-    /* 注意：不创建 .claude-code 目录 */
+    /* 注意：不创建 .claude-internal 目录 */
 
     const skill = await createMockSkill(sourceDir, 'skill-d', '# Skill D');
     const config = createTestConfig();
@@ -270,10 +273,10 @@ describe('syncProjectResources（项目级同步）', () => {
     expect(summary.results[0].targetResults).toHaveLength(1);
     expect(summary.results[0].targetResults[0].targetName).toBe('codebuddy');
 
-    /* 验证 .claude-code/skills/skill-d 不应存在 */
+    /* 验证 .claude-internal/skills/skill-d 不应存在 */
     const claudeSkillDir = path.join(
       singleToolProjectDir,
-      '.claude-code/skills/skill-d',
+      '.claude-internal/skills/skill-d',
     );
     await expect(fs.access(claudeSkillDir)).rejects.toThrow();
 
@@ -328,6 +331,7 @@ describe('syncTasks（v0.4 任务驱动引擎）', () => {
       created: 0,
       updated: 0,
       skipped: 0,
+      skippedMissingTool: 0,
       failed: 0,
     });
   });

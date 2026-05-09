@@ -168,6 +168,7 @@ function emitSummaryEvent(
     created: number;
     updated: number;
     skipped: number;
+    skippedMissingTool?: number;
   },
   resultsStub: { skillName: string; targetResults: [] }[],
 ): void {
@@ -182,6 +183,7 @@ function emitSummaryEvent(
       created: counts.created,
       updated: counts.updated,
       skipped: counts.skipped,
+      skippedMissingTool: counts.skippedMissingTool ?? 0,
       /* SyncSummary 历史字段，保持兼容（PR-5 中 list 也会消费类似结构） */
       results: resultsStub,
     },
@@ -203,6 +205,7 @@ function printHumanSummary(
     created: number;
     updated: number;
     skipped: number;
+    skippedMissingTool?: number;
     failed: number;
   },
 ): void {
@@ -217,6 +220,9 @@ function printHumanSummary(
   if (counts.created > 0) parts.push(pc.green(`新增 ${counts.created}`));
   if (counts.updated > 0) parts.push(pc.yellow(`更新 ${counts.updated}`));
   if (counts.skipped > 0) parts.push(pc.dim(`跳过 ${counts.skipped}`));
+  if (counts.skippedMissingTool && counts.skippedMissingTool > 0) {
+    parts.push(pc.gray(`未检测到工具 ${counts.skippedMissingTool}`));
+  }
   if (counts.failed > 0) parts.push(pc.red(`失败 ${counts.failed}`));
 
   reporter.info(
@@ -228,6 +234,9 @@ function printHumanSummary(
 
 /**
  * human 模式下每条进度打印
+ *
+ * FEAT-005：新增 'skipped_missing_tool' 行（灰色 ⊘ + 提示路径），
+ * 用户可立刻看到哪些 target 因为未安装而被跳过。
  */
 function printHumanProgress(ev: TaskProgressEvent): void {
   if (isJsonMode()) return;
@@ -239,7 +248,9 @@ function printHumanProgress(ev: TaskProgressEvent): void {
         ? pc.yellow('🔄')
         : ev.action === 'failed'
           ? pc.red('✖')
-          : pc.dim('⏭️');
+          : ev.action === 'skipped_missing_tool'
+            ? pc.gray('⊘')
+            : pc.dim('⏭️');
   const actionLabel =
     ev.action === 'created'
       ? '新增'
@@ -247,10 +258,19 @@ function printHumanProgress(ev: TaskProgressEvent): void {
         ? '更新'
         : ev.action === 'failed'
           ? '失败'
-          : '已最新';
+          : ev.action === 'skipped_missing_tool'
+            ? '未检测到工具'
+            : '已最新';
 
-  const line = `   ${icon} ${ev.task.resource.dirName} → ${ev.task.target.name} (${actionLabel})`;
-  console.log(ev.error ? `${line}  ${pc.red(ev.error)}` : line);
+  const baseLine = `   ${icon} ${ev.task.resource.dirName} → ${ev.task.target.name} (${actionLabel})`;
+  if (ev.action === 'skipped_missing_tool' && ev.expectedPath) {
+    /* 灰色路径附在行尾，提示用户：aitools 不会代为创建该目录 */
+    console.log(`${baseLine}  ${pc.gray(`(${ev.expectedPath} 不存在)`)}`);
+  } else if (ev.error) {
+    console.log(`${baseLine}  ${pc.red(ev.error)}`);
+  } else {
+    console.log(baseLine);
+  }
 }
 
 /* ============================================================
