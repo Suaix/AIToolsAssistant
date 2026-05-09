@@ -13,7 +13,11 @@
 | 工具 | 用户级基础目录 | 项目级基础目录 |
 |---|---|---|
 | **CodeBuddy** | `~/.codebuddy/` | `<project>/.codebuddy/` |
-| **Claude Code** | `~/.claude/` | `<project>/.claude-code/` |
+| **WorkBuddy** | `~/.workbuddy/` | `<project>/.workbuddy/` |
+| **Claude Internal** | `~/.claude-internal/` | `<project>/.claude-internal/` |
+
+> v0.5.0 起，Claude 工具规范名统一为 `claude-internal`（避开 Claude Code 官方 CLI 占用的 `~/.claude/`）。
+> 旧名 `claude-code` 与旧路径 `~/.claude/` 在升级时会被自动迁移，详见下文「v0.5.0 破坏性变更」。
 
 实际同步路径 = 基础目录 + 资源类型子目录，例如：
 - 用户级 skills → `~/.codebuddy/skills/<name>/`
@@ -28,9 +32,38 @@
 - 🎨 **交互式配置** — 源目录可选、骨架自动生成、同步工具非必填
 - 📡 **JSON 流式事件** — `--json` 模式产出 NDJSON，方便 GUI / CI 集成
 
+## v0.5.0 变更（FEAT-005）
+
+> 与 v0.4.x 完全兼容；存量配置启动时**自动迁移**，无需手动操作。
+
+1. **Claude 工具命名统一**：旧名 `claude-code` / 旧 user_base `~/.claude/` → 新名 `claude-internal` / 新 user_base `~/.claude-internal/`（避开 Claude Code 官方 CLI 占用的 `~/.claude/`）
+2. **配置 schema 引入版本字段**：`~/.aitools/config.yaml` 与 `<project>/.aitools/project.yaml` 顶层新增 `version: 6` 字段
+3. **自动迁移机制**：首次执行任意 CLI 命令时，旧版配置（v0.2 含 `user_path` / v0.4 缺 `user_subscriptions`）会被自动升级，原文件备份为 `<file>.bak`
+4. **目录创建边界守卫**（US-6）：sync 时若 AI 工具家目录不存在（如 `~/.codebuddy/`、`~/.claude-internal/`），不再主动 mkdir，而是明确跳过并提示「未检测到该工具」。aitools 只管理资源，工具的安装是用户/工具自身的职责
+5. **AI 工具元数据 SSOT**：仓库根 `shared/tools.json` 作为单一真相源，CLI 与 GUI 共享
+
+### 自动迁移说明
+
+升级到 v0.5.0 后首次运行任意 `aitools` 命令时：
+
+```
+ℹ 检测到旧版配置，已自动升级 (v1 → v6)
+ℹ   原配置已备份至：~/.aitools/config.yaml.bak
+ℹ   · Target "claude-code" 命名统一：claude-code → claude-internal
+ℹ   · Target user_base 统一：~/.claude → ~/.claude-internal
+```
+
+GUI 用户首次启动会弹出「配置已自动升级」提示窗，详细列出变更项。
+
+如果旧的 `~/.claude/` 或 `~/.claude-code/` 目录里已经有同步的资源，CLI 会把它们合并到新的 `~/.claude-internal/`：
+- 同名内容相同 → 直接跳过
+- 同名内容不同 → 报错列出冲突清单，**不静默覆盖**
+
 ## v0.4.0 破坏性变更（Breaking Changes）
 
 相对 v0.3.x 的升级需要**清理旧配置并重建**（不提供迁移工具）：
+
+> 注：v0.5.0 起，从 v0.2/v0.3/v0.4.x 升级到 v0.5+ 已支持自动迁移；本节保留作为历史记录。
 
 1. **源目录扁平化**：`<source>/skills/{user,project}/<name>/` → `<source>/skills/<name>/`
 2. **订阅模型**：引入 `user_subscriptions` 配置字段；资源不再有 `user/project` 属性
@@ -40,6 +73,9 @@
 6. **JSON 事件升级**：所有事件新增 `version: 2` 字段；sync 事件的 `scope` 字段替换为 `location: { scope, projectDir? }`
 
 ### 升级指引
+
+> v0.5.0 起从 v0.4.x 升级**无需手动操作**——启动时自动迁移，无需删除 `~/.aitools`。
+> 下方步骤仅在你从 v0.3.x 或更早版本升级时需要：
 
 ```bash
 # 备份（可选）
@@ -96,7 +132,7 @@ aitools 把世界切成**三个正交维度**：
 
 ```
 【资源】 一个 skill/command/agent/rule 文件夹   (只有一份源)
-【目标】 AI 工具的配置目录                       (CodeBuddy / Claude Code)
+【目标】 AI 工具的配置目录                       (CodeBuddy / Claude Internal)
 【订阅】 声明「某资源要同步到某落点」             (user / project)
 ```
 
@@ -126,14 +162,15 @@ aitools init
 初始化后的配置文件示例：
 
 ```yaml
+version: 6
 source: ~/.aitools
 targets:
   - name: codebuddy
     enabled: true
     user_base: ~/.codebuddy
-  - name: claude-code
+  - name: claude-internal
     enabled: false
-    user_base: ~/.claude
+    user_base: ~/.claude-internal
 sync:
   default_scope: user
   clean: false
@@ -234,7 +271,7 @@ aitools unsubscribe skills frontend-design --scope project --prune
 aitools target enable codebuddy
 
 # 禁用一个 target（退出 sync；已同步目录保留）
-aitools target disable claude-code
+aitools target disable claude-internal
 
 # GUI / 脚本消费（NDJSON）
 aitools --json target enable codebuddy
@@ -246,7 +283,7 @@ aitools --json target enable codebuddy
 
 | 参数 | 说明 |
 |---|---|
-| `<name>` | target 名称（对应 `config.yaml` 中 `targets[].name`，如 `codebuddy`、`claude-code`） |
+| `<name>` | target 名称（对应 `config.yaml` 中 `targets[].name`，如 `codebuddy`、`claude-internal`） |
 
 语义要点：
 
@@ -306,12 +343,12 @@ aitools list --type skills
 
 📋 [skills] 用户级订阅
 
-┌───────────────┬──────────┬──────────┐
-│ 名称          │ CodeBuddy│ Claude Code│
-├───────────────┼──────────┼──────────┤
-│ code-review   │ ✅ 已同步│ ✅ 已同步 │
-│ git-workflow  │ ⚠️ 需更新│ ✅ 已同步 │
-└───────────────┴──────────┴──────────┘
+┌───────────────┬──────────┬─────────────────┐
+│ 名称          │ CodeBuddy│ Claude Internal │
+├───────────────┼──────────┼─────────────────┤
+│ code-review   │ ✅ 已同步│ ✅ 已同步       │
+│ git-workflow  │ ⚠️ 需更新│ ✅ 已同步       │
+└───────────────┴──────────┴─────────────────┘
 
 📁 [skills] 项目级订阅 (项目: /path/to/my-app)
 

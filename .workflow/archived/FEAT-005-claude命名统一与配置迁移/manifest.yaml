@@ -1,0 +1,137 @@
+# ============================================================
+# FEAT-005：claude 命名统一 + 旧 config 迁移
+# ============================================================
+
+# === 基础信息 ===
+id: "FEAT-005"
+title: "claude 命名统一 + 旧 config 迁移"
+type: "FEAT"
+created: "2026-05-09"
+updated: "2026-05-09"
+
+# === 状态 ===
+status: "ARCHIVED"
+sub_status: null
+
+# === 阶段详情 ===
+phases:
+  analysis:
+    status: "completed"
+    started: "2026-05-09"
+    completed: "2026-05-09"
+    output: "01-requirements.md"
+  design:
+    status: "completed"
+    started: "2026-05-09"
+    completed: "2026-05-09"
+    output: "02-design.md"
+  technical:
+    status: "completed"
+    started: "2026-05-09"
+    completed: "2026-05-09"
+    output: "03-technical.md"
+  coding:
+    status: "completed"
+    started: "2026-05-09"
+    completed: "2026-05-09"
+    output: "04-coding-log.md"
+  testing:
+    status: "completed"
+    started: "2026-05-09"
+    completed: "2026-05-09"
+    output: "05-testing.md"
+  testing:
+    status: "pending"
+    started: null
+    completed: null
+    output: "05-testing.md"
+
+# === 门禁 ===
+gates:
+  analysis_to_design:
+    checklist:
+      - "需求范围明确"
+      - "验收标准（AC）已定义"
+      - "用户故事完整"
+    passed:
+      - "需求范围明确"
+      - "验收标准（AC）已定义"
+      - "用户故事完整"
+    skipped: []
+
+  design_to_technical:
+    checklist:
+      - "页面流程完整"
+      - "组件规范引用"
+      - "交互状态覆盖（空态/加载/错误/成功）"
+    passed:
+      - "页面流程完整"
+      - "组件规范引用"
+      - "交互状态覆盖（空态/加载/错误/成功）"
+    skipped: []
+
+  technical_to_coding:
+    checklist:
+      - "架构设计完整"
+      - "接口定义明确"
+      - "影响范围已评估"
+    passed:
+      - "架构设计完整"
+      - "接口定义明确"
+      - "影响范围已评估"
+    skipped: []
+
+  coding_to_testing:
+    checklist:
+      - "自测通过"
+      - "代码已提交"
+      - "编码日志已更新"
+    passed:
+      - "自测通过"
+      - "编码日志已更新"
+    skipped:
+      - item: "代码已提交"
+        reason: "代码改动尚未 git commit；待用户在归档前自行提交（用户规则要求 type(scope): description 格式）"
+        date: "2026-05-09"
+
+  testing_to_archived:
+    checklist:
+      - "功能验收通过"
+      - "UI 走查通过"
+      - "文档归档完成"
+    passed:
+      - "功能验收通过"
+      - "UI 走查通过"
+      - "文档归档完成"
+    skipped: []
+
+# === AI 上下文恢复 ===
+context:
+  last_action: "TESTING → ARCHIVED 门禁通过；用户走查验收通过；任务即将移至 .workflow/archived/"
+  next_action: "（已归档）"
+  blockers: []
+  decisions:
+    - date: "2026-05-09"
+      decision: "Claude 工具规范名采用 claude-internal，user_base 为 ~/.claude-internal"
+      reason: "Claude Code 官方 CLI 已占用 ~/.claude/，aitools 应避开冲突；GUI 与 target add 现状已使用此名，改动面更小"
+    - date: "2026-05-09"
+      decision: "存量 ~/.claude-internal/ 资源策略：aitools 不再主动创建该目录；若旧目录已存在，启动时检测并自动合并到新规范名对应目录"
+      reason: "Q-3 选 A（自动合并）+ Q-2 暴露的语义边界问题：aitools 不应主动 mkdir AI 工具家目录"
+    - date: "2026-05-09"
+      decision: "Config / ProjectConfig 顶层引入 version 字段（命名 version，非 schemaVersion）"
+      reason: "Q-4，与 yaml 既有命名风格保持一致"
+    - date: "2026-05-09"
+      decision: "迁移备份策略：只保留最近一次 .bak（覆盖式），不积累 timestamp 多版本"
+      reason: "Q-5，避免长期遗留备份文件；用户回滚需求场景较弱"
+    - date: "2026-05-09"
+      decision: "本任务内下线 desktop/src/lib/tools.ts:TOOL_PROJECT_DIR_ALIASES 双名映射"
+      reason: "Q-6，迁移逻辑会在启动时把存量 .claude-code 等改名为新规范名，下线兼容代码不再需要"
+    - date: "2026-05-09"
+      decision: "SSOT 落位：仓库根 shared/tools.json（JSON 数据）+ shared/tools.schema.ts（类型）；CLI 与 desktop 各自包薄类型适配层"
+      reason: "Q-7 落地。CLI 与 desktop 是独立 npm 包、不同 tsconfig 与 moduleResolution；JSON 完全规避跨包 import；未来 Rust 端也能 include_str! 同一文件"
+    - date: "2026-05-09"
+      decision: "范围扩展：纳入『aitools 不主动创建 AI 工具家目录』的语义边界守卫（新增 US-6）"
+      reason: "Q-2 引发的代码核查发现 src/core/syncer.ts 中 mkdir(targetBaseDir, { recursive: true }) 会主动创建 ~/.codebuddy、~/.claude-internal 等 AI 工具家目录，违反 aitools 设计语义；命名统一与目录守卫存在强耦合，应在同一任务中处理"
+    - date: "2026-05-09"
+      decision: "本任务不做项目结构三段式重组（CLI / GUI / shared 拆分），仅引入 shared/ 公共契约目录；结构重组拆为独立 REFACTOR-001"
+      reason: "本任务已含数据迁移 + 跨端同步等高风险变更，再叠加纯重构会让事故定位难度翻倍；CLI 与 desktop 已事实上解耦（不同 package.json、不通过 import 调用），结构问题主要是 mental model 层面，可独立解决；REFACTOR-001 已登记至 .workflow/backlog.md，FEAT-005 上线稳定一周后启动"
