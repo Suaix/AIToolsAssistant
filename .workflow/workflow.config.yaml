@@ -10,7 +10,7 @@
 counters:
   FEAT: 5        # 新功能
   FIX: 0         # 缺陷修复
-  REFACTOR: 0    # 重构
+  REFACTOR: 1    # 重构
 
 # --- 任务类型定义 ---
 types:
