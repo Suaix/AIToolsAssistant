@@ -115,4 +115,39 @@ FEAT-005 完成归档后，用户主动触发"新建任务 REFACTOR-001"指令�
 
 ---
 
+### BUG-001：迁移测试污染用户家目录 + GUI 缺陷弹窗陈旧记录
+
+**记录日期**：2026-05-09
+**触发场景**：FEAT-005 验收后启动 desktop，弹出"配置已自动升级"，但 `backupPath` 指向 `/var/folders/.../T/aitools-migration-test-xxx/`（vitest 临时夹具）
+**影响等级**：中（不阻塞功能，但破坏 US-6「aitools 不应在测试时影响用户家目录」原则，且 GUI 显示误导信息）
+
+#### 根因分析
+
+1. **测试隔离缺陷**：`src/config/migrations/index.ts:persistLastMigration()` 调用 `os.homedir()` 直写 `~/.aitools/.last-migration.json`；vitest 跑迁移调度器测试时未隔离该写入路径，污染了真实用户家目录
+2. **GUI 防御缺失**：`desktop/src/App.tsx` 启动时读取 `.last-migration.json` 未校验 `backupPath` 文件是否仍存在；陈旧记录（备份已被 tmp 清理 / 用户主动删除）也会触发弹窗
+
+#### 修复方向
+
+**修复 1：测试隔离（CLI 侧）**
+- 方案 A（推荐）：将 `lastMigrationPath()` 改为读取环境变量 `AITOOLS_LAST_MIGRATION_PATH` 优先，未设置时才回退到 `~/.aitools/.last-migration.json`；vitest setup 文件统一注入指向 fixture 目录的环境变量
+- 方案 B：把 `persistLastMigration` 抽成依赖注入参数，测试传 noop 或 fixture writer
+- 方案 C：在 `migrateConfigDispatch` 增加 `options.persistLastMigration?: boolean` 开关，测试默认关闭
+
+**修复 2：GUI 陈旧校验（desktop 侧）**
+- 读取 `.last-migration.json` 后用 Tauri `read_text_file_optional` 探测 `backupPath` 是否存在
+- 不存在 → 视为陈旧记录，静默删除 `.last-migration.json`，不弹窗
+- 存在 → 正常弹窗（当前逻辑）
+
+#### 验收标准
+
+- 跑完 `pnpm test` 后 `~/.aitools/.last-migration.json` 不应出现（测试不污染家目录）
+- 手动构造 `.last-migration.json` 但 `backupPath` 指向不存在的路径，启动 desktop 不应弹窗，且文件被清理
+- 增加单测覆盖：陈旧记录 → 不弹窗；有效记录 → 正常弹窗
+
+#### 启动方式
+
+非紧急，FEAT-005 / REFACTOR-001 之后或下次接触迁移代码时合并处理。
+
+---
+
 <!-- 后续待启动任务在此追加 -->
