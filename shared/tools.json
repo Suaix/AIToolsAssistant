@@ -1,0 +1,38 @@
+{
+  "$schema": "./tools.schema.json",
+  "schemaVersion": 1,
+  "tools": [
+    {
+      "name": "codebuddy",
+      "displayName": "CodeBuddy",
+      "userBase": "~/.codebuddy",
+      "projectDirAliases": [".codebuddy"],
+      "defaultEnabled": true
+    },
+    {
+      "name": "workbuddy",
+      "displayName": "WorkBuddy",
+      "userBase": "~/.workbuddy",
+      "projectDirAliases": [".workbuddy"],
+      "defaultEnabled": false
+    },
+    {
+      "name": "claude-internal",
+      "displayName": "Claude Internal",
+      "userBase": "~/.claude-internal",
+      "projectDirAliases": [".claude-internal"],
+      "defaultEnabled": false
+    }
+  ],
+  "legacyAliases": {
+    "claude-code": "claude-internal",
+    "claude": "claude-internal"
+  },
+  "legacyUserBases": {
+    "~/.claude": "~/.claude-internal",
+    "~/.claude-code": "~/.claude-internal"
+  },
+  "legacyProjectDirs": {
+    ".claude-code": ".claude-internal"
+  }
+}

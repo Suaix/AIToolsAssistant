@@ -23,6 +23,7 @@ import {
   getConfigPath,
   getDefaultSourceDir,
 } from '../config/manager.js';
+import { getToolDisplayName } from '../registry/tools.js';
 import { getHandler } from '../core/resources/registry.js';
 import type { Target } from '../types/index.js';
 
@@ -104,10 +105,11 @@ export async function initCommand(): Promise<void> {
     );
   }
 
-  /* 步骤 3：选择同步目标工具（非必填，默认 codebuddy） */
+  /* 步骤 3：选择同步目标工具（FEAT-005：选项与默认值均来自 SSOT） */
   const defaultTargets = getDefaultTargets();
   const choices = defaultTargets.map((t) => ({
-    name: t.name === 'codebuddy' ? 'CodeBuddy' : 'Claude Code',
+    /* 显示名通过 SSOT 适配层获取，删除硬编码三元 */
+    name: getToolDisplayName(t.name),
     value: t.name,
     /* 默认勾选状态与 getDefaultTargets 返回的 enabled 保持一致 */
     checked: t.enabled,

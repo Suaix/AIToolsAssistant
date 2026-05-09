@@ -6,6 +6,10 @@
   "bin": {
     "aitools": "./dist/index.js"
   },
+  "files": [
+    "dist",
+    "shared"
+  ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",

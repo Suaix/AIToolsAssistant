@@ -17,6 +17,7 @@
  */
 import { loadConfig, saveConfig } from '../config/manager.js';
 import { reporter, isJsonMode, emitJson } from '../utils/reporter.js';
+import { findTool, getAllTools } from '../registry/tools.js';
 
 /**
  * 错误码：指定名称的 target 在配置中不存在
@@ -111,15 +112,12 @@ export async function targetDisableCommand(name: string): Promise<void> {
 }
 
 /* ============================================================
- * 预定义工具列表（FEAT-003 新增）
+ * 预定义工具列表（FEAT-005：来源切换为 SSOT）
+ *
+ * 历史背景：FEAT-003 在本文件硬编码 AVAILABLE_TOOLS，且与 src/config/manager.ts
+ * 中的默认工具列表不一致（claude-internal vs claude-code）。FEAT-005 统一到 SSOT，
+ * 由 shared/tools.json 提供唯一真相源。
  * ============================================================ */
-
-/** 预定义支持的工具及其 user_base 目录 */
-const AVAILABLE_TOOLS: { name: string; user_base: string }[] = [
-  { name: 'codebuddy', user_base: '~/.codebuddy' },
-  { name: 'workbuddy', user_base: '~/.workbuddy' },
-  { name: 'claude-internal', user_base: '~/.claude-internal' },
-];
 
 /* ============================================================
  * target add 命令（FEAT-003 新增）
@@ -128,16 +126,18 @@ const AVAILABLE_TOOLS: { name: string; user_base: string }[] = [
 /**
  * `aitools target add <name>` 命令入口
  *
- * 从预定义列表中查找工具并追加到 config.targets。
+ * 从 SSOT 中查找工具并追加到 config.targets。
  * 默认 enabled: true。幂等：已存在则跳过。
  *
  * @param name 工具名（如 'codebuddy'、'workbuddy'、'claude-internal'）
  */
 export async function targetAddCommand(name: string): Promise<void> {
-  /* 校验 name 是否在预定义列表中 */
-  const toolDef = AVAILABLE_TOOLS.find((t) => t.name === name);
+  /* 校验 name 是否在 SSOT 中（FEAT-005：替换硬编码 AVAILABLE_TOOLS） */
+  const toolDef = findTool(name);
   if (!toolDef) {
-    const available = AVAILABLE_TOOLS.map((t) => t.name).join(', ');
+    const available = getAllTools()
+      .map((t) => t.name)
+      .join(', ');
     reporter.error(`未知的工具: ${name}`);
     reporter.info(`   可用工具: ${available}`);
     if (isJsonMode()) emitJson({ event: 'done', data: { exitCode: 1 } });
@@ -162,17 +162,17 @@ export async function targetAddCommand(name: string): Promise<void> {
     return;
   }
 
-  /* 追加新 target */
+  /* 追加新 target（user_base 来自 SSOT） */
   config.targets.push({
     name: toolDef.name,
     enabled: true,
-    user_base: toolDef.user_base,
+    user_base: toolDef.userBase,
   });
   await saveConfig(config);
 
   reporter.success(`target "${name}" 已添加（已启用）`);
   if (isJsonMode()) {
-    emitJson({ event: 'target.added', data: { name, user_base: toolDef.user_base, changed: true } });
+    emitJson({ event: 'target.added', data: { name, user_base: toolDef.userBase, changed: true } });
     emitJson({ event: 'done', data: { exitCode: 0 } });
   }
 }

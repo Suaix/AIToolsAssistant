@@ -15,6 +15,7 @@
 import fs from 'node:fs/promises';
 import pc from 'picocolors';
 import { loadConfig, expandTilde } from '../config/manager.js';
+import { getToolDisplayName } from '../registry/tools.js';
 import {
   loadProjectConfig,
   projectConfigExists,
@@ -123,13 +124,14 @@ function formatStatus(status: 'synced' | 'changed' | 'not_synced'): string {
   }
 }
 
-/** target 名展示（首字母大写 + 一些美化映射） */
-const TARGET_DISPLAY: Record<string, string> = {
-  codebuddy: 'CodeBuddy',
-  'claude-code': 'Claude Code',
-};
+/**
+ * target 名展示
+ *
+ * FEAT-005：从 SSOT 派生，删除硬编码的 TARGET_DISPLAY map。
+ * 未在 SSOT 中的工具回退原 name，保持向后兼容。
+ */
 function displayTarget(name: string): string {
-  return TARGET_DISPLAY[name] ?? name;
+  return getToolDisplayName(name);
 }
 
 /** 资源名最大显示宽度（超出截断） */
