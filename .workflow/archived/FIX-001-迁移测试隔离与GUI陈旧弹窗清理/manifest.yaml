@@ -6,7 +6,7 @@ created: "2026-05-11"
 updated: "2026-05-11"
 
 # === 状态 ===
-status: "CODING"
+status: "ARCHIVED"
 sub_status: null
 
 # === 阶段详情 ===
@@ -27,14 +27,14 @@ phases:
     completed: "2026-05-11"
     output: "03-technical.md"
   coding:
-    status: "in_progress"
+    status: "completed"
     started: "2026-05-11"
-    completed: null
+    completed: "2026-05-11"
     output: "04-coding-log.md"
   testing:
-    status: "pending"
-    started: null
-    completed: null
+    status: "completed"
+    started: "2026-05-11"
+    completed: "2026-05-11"
     output: "05-testing.md"
 
 # === 门禁 ===
@@ -83,7 +83,10 @@ gates:
       - "自测通过"
       - "代码已提交"
       - "编码日志已更新"
-    passed: []
+    passed:
+      - "自测通过"
+      - "代码已提交"
+      - "编码日志已更新"
     skipped: []
 
   testing_to_archived:
@@ -91,13 +94,16 @@ gates:
       - "功能验收通过"
       - "UI 走查通过"
       - "文档归档完成"
-    passed: []
+    passed:
+      - "功能验收通过"
+      - "UI 走查通过"
+      - "文档归档完成"
     skipped: []
 
 # === AI 上下文恢复 ===
 context:
-  last_action: "完成 CODING 阶段：阶段 A commit a0251e7（CLI 测试隔离 + dead import）+ 阶段 B commit 77fad53（GUI 陈旧校验）；186 测试全绿、lint 0 error、两个手动验收场景全过；04-coding-log.md / CHANGELOG.md 已更新"
-  next_action: "执行 coding → testing 门禁，进入 TESTING 阶段做最终验收 + 归档"
+  last_action: "通过 testing → archived 门禁（3/3 passed）；FIX-001 全流程完成，准备归档"
+  next_action: "git mv 任务到 archived/ + 推送远程"
   blockers: []
   decisions:
     - date: "2026-05-11"

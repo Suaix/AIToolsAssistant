@@ -120,7 +120,12 @@ FEAT-005 完成归档后，用户主动触发"新建任务 REFACTOR-001"指令�
 
 ---
 
-### BUG-001：迁移测试污染用户家目录 + GUI 缺陷弹窗陈旧记录
+### ~~BUG-001：迁移测试污染用户家目录 + GUI 缺陷弹窗陈旧记录~~ ✅ 已完成
+
+> **已于 2026-05-11 在 FIX-001 中完成（实际方案为对齐 `os.homedir` spy 惯用法，非 backlog 设想的环境变量方案）**
+> 详见 `.workflow/archived/FIX-001-迁移测试隔离与GUI陈旧弹窗清理/`
+
+**原登记内容（保留备查）**：
 
 **记录日期**：2026-05-09
 **触发场景**：FEAT-005 验收后启动 desktop，弹出"配置已自动升级"，但 `backupPath` 指向 `/var/folders/.../T/aitools-migration-test-xxx/`（vitest 临时夹具）
