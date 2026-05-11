@@ -7,7 +7,7 @@
  *   - 反例：parse_failed / write_failed
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
@@ -37,10 +37,15 @@ beforeEach(async () => {
   projectConfigPath = path.join(tempDir, 'project.yaml');
   reporter = new NoopMigrationReporter();
   setDefaultReporter(reporter);
+  /* FIX-001：与 manager.test.ts / subscribe.test.ts / unsubscribe.test.ts 惯用法对齐
+     避免 persistLastMigration 写入 ~/.aitools/.last-migration.json 污染真实家目录 */
+  vi.spyOn(os, 'homedir').mockReturnValue(tempDir);
 });
 
 afterEach(async () => {
   resetDefaultReporter();
+  /* FIX-001：恢复 os.homedir spy，避免泄漏到其他测试 */
+  vi.restoreAllMocks();
   await fs.rm(tempDir, { recursive: true, force: true });
 });
 

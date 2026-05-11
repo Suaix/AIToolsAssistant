@@ -22,7 +22,6 @@ import {
   saveConfig,
   expandTilde,
   collapseTilde,
-  getConfigDir,
 } from '../config/manager.js';
 import { reporter, isJsonMode, emitJson } from '../utils/reporter.js';
 

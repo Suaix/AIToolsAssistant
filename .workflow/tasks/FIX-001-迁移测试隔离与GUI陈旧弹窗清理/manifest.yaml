@@ -1,0 +1,117 @@
+# === 基础信息 ===
+id: "FIX-001"
+title: "迁移测试污染家目录 + GUI 陈旧弹窗清理（含 dead code cleanup）"
+type: "FIX"
+created: "2026-05-11"
+updated: "2026-05-11"
+
+# === 状态 ===
+status: "CODING"
+sub_status: null
+
+# === 阶段详情 ===
+phases:
+  analysis:
+    status: "completed"
+    started: "2026-05-11"
+    completed: "2026-05-11"
+    output: "01-requirements.md"
+  design:
+    status: "completed"
+    started: "2026-05-11"
+    completed: "2026-05-11"
+    output: "02-design.md"
+  technical:
+    status: "completed"
+    started: "2026-05-11"
+    completed: "2026-05-11"
+    output: "03-technical.md"
+  coding:
+    status: "in_progress"
+    started: "2026-05-11"
+    completed: null
+    output: "04-coding-log.md"
+  testing:
+    status: "pending"
+    started: null
+    completed: null
+    output: "05-testing.md"
+
+# === 门禁 ===
+gates:
+  analysis_to_design:
+    checklist:
+      - "需求范围明确"
+      - "验收标准（AC）已定义"
+      - "用户故事完整"
+    passed:
+      - "需求范围明确"
+      - "验收标准（AC）已定义"
+      - "用户故事完整"
+    skipped: []
+
+  design_to_technical:
+    checklist:
+      - "页面流程完整"
+      - "组件规范引用"
+      - "交互状态覆盖（空态/加载/错误/成功）"
+    passed: []
+    skipped:
+      - item: "页面流程完整"
+        reason: "纯技术 bug 修复，零 UI 变更，无页面流程"
+        date: "2026-05-11"
+      - item: "组件规范引用"
+        reason: "不涉及任何 UI 组件"
+        date: "2026-05-11"
+      - item: "交互状态覆盖（空态/加载/错误/成功）"
+        reason: "GUI 侧仅增加'弹窗不出现'的负行为，无新交互路径"
+        date: "2026-05-11"
+
+  technical_to_coding:
+    checklist:
+      - "架构设计完整"
+      - "接口定义明确"
+      - "影响范围已评估"
+    passed:
+      - "架构设计完整"
+      - "接口定义明确"
+      - "影响范围已评估"
+    skipped: []
+
+  coding_to_testing:
+    checklist:
+      - "自测通过"
+      - "代码已提交"
+      - "编码日志已更新"
+    passed: []
+    skipped: []
+
+  testing_to_archived:
+    checklist:
+      - "功能验收通过"
+      - "UI 走查通过"
+      - "文档归档完成"
+    passed: []
+    skipped: []
+
+# === AI 上下文恢复 ===
+context:
+  last_action: "完成 03-technical.md 初稿：3 个修改点 + 2 阶段 16 步 + 6 项风险 + 7 条 TD，关键决策 TD-1（方案 D）与 TD-2（新增 file_exists_absolute command）"
+  next_action: "等用户审阅 03-technical.md，确认后执行 technical → coding 门禁，开工"
+  blockers: []
+  decisions:
+    - date: "2026-05-11"
+      decision: "按 workflow 标准用 FIX-001 命名（非 BUG-001），与 workflow.config.yaml 的 counter 约定对齐"
+      reason: "backlog 里的 BUG-001 只是草稿命名；workflow 模板未定义 BUG 类型，引入新类型成本大于收益"
+    - date: "2026-05-11"
+      decision: "L-1 dead import 顺带合并进本任务，不单独立 FIX-002"
+      reason: "改动极小（1 行删除），单独走 workflow 成本过高；本任务 CODING 阶段增加一个独立 commit 即可，保持 git blame 清晰"
+    - date: "2026-05-11"
+      decision: "测试隔离采用方案 D（vi.spyOn os.homedir），非方案 A（环境变量）/B（依赖注入）/C（模块 mock）"
+      reason: "项目已有成熟的 os.homedir spy 惯用法（manager.test.ts、subscribe.test.ts、unsubscribe.test.ts），migrations.test.ts 只是漏补；方案 D 生产代码零改动，与项目保持一致，工作量最小"
+    - date: "2026-05-11"
+      decision: "GUI 陈旧校验采用静默删除策略（Q-3）"
+      reason: ".last-migration.json 本质是一次性通知性质，保留失效记录无收益，只会累积垃圾文件"
+    - date: "2026-05-11"
+      decision: "不做 UI 走查（Q-4）"
+      reason: "本任务 UI 层面仅涉及'弹窗不出现'的负行为，零视觉变更"
