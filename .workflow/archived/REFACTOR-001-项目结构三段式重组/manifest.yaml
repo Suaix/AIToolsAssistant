@@ -6,7 +6,7 @@ created: "2026-05-09"
 updated: "2026-05-09"
 
 # === 状态 ===
-status: "CODING"
+status: "ARCHIVED"
 sub_status: null
 
 # === 阶段详情 ===
@@ -27,14 +27,14 @@ phases:
     completed: "2026-05-09"
     output: "03-technical.md"
   coding:
-    status: "in_progress"
+    status: "completed"
     started: "2026-05-09"
-    completed: null
+    completed: "2026-05-11"
     output: "04-coding-log.md"
   testing:
-    status: "pending"
-    started: null
-    completed: null
+    status: "completed"
+    started: "2026-05-11"
+    completed: "2026-05-11"
     output: "05-testing.md"
 
 # === 门禁 ===
@@ -83,7 +83,10 @@ gates:
       - "自测通过"
       - "代码已提交"
       - "编码日志已更新"
-    passed: []
+    passed:
+      - "自测通过"
+      - "代码已提交"
+      - "编码日志已更新"
     skipped: []
 
   testing_to_archived:
@@ -91,13 +94,16 @@ gates:
       - "功能验收通过"
       - "UI 走查通过"
       - "文档归档完成"
-    passed: []
+    passed:
+      - "功能验收通过"
+      - "UI 走查通过"
+      - "文档归档完成"
     skipped: []
 
 # === AI 上下文恢复 ===
 context:
-  last_action: "通过 technical → coding 门禁（3/3 passed），任务推进到 CODING 状态。但实际编码暂缓，等 FEAT-005 本地自测稳定（约 2-3 天，2026-05-11 后）"
-  next_action: "等待用户主动触发开始编码。届时按 03-technical.md 第 6 章先执行 PR-1（物理搬迁，23 步），观察 24h 后执行 PR-2（契约重写，13 步）"
+  last_action: "通过 testing → archived 门禁（3/3 passed），任务归档完成"
+  next_action: "任务已完成，移动到 .workflow/archived/"
   blockers: []
   decisions:
     - date: "2026-05-09"
