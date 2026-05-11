@@ -96,8 +96,8 @@ gates:
 
 # === AI 上下文恢复 ===
 context:
-  last_action: "完成 03-technical.md 初稿：3 个修改点 + 2 阶段 16 步 + 6 项风险 + 7 条 TD，关键决策 TD-1（方案 D）与 TD-2（新增 file_exists_absolute command）"
-  next_action: "等用户审阅 03-technical.md，确认后执行 technical → coding 门禁，开工"
+  last_action: "完成 CODING 阶段：阶段 A commit a0251e7（CLI 测试隔离 + dead import）+ 阶段 B commit 77fad53（GUI 陈旧校验）；186 测试全绿、lint 0 error、两个手动验收场景全过；04-coding-log.md / CHANGELOG.md 已更新"
+  next_action: "执行 coding → testing 门禁，进入 TESTING 阶段做最终验收 + 归档"
   blockers: []
   decisions:
     - date: "2026-05-11"

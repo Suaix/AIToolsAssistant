@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed (FIX-001)
+
+- **测试隔离**：`tests/config/migrations.test.ts` 补 `vi.spyOn(os, 'homedir')`，与 `manager.test.ts` / `subscribe.test.ts` 等已有惯用法对齐；跑完 `pnpm test` 不再污染 `~/.aitools/.last-migration.json`。生产代码零改动。
+- **GUI 陈旧弹窗清理**：desktop 启动时校验 `.last-migration.json` 中 `backupPath` 是否存在，不存在则静默清理 `.last-migration.json` 不弹窗，避免向用户展示指向不存在备份的误导信息。
+- **dead code**：删除 `commands/config.ts` 未使用的 `getConfigDir` import（REFACTOR-001 遗留 L-1）。
+
+### Added (FIX-001)
+
+- Tauri command `file_exists_absolute(path)`：轻量只读 stat，仅供 GUI 启动校验使用，无副作用、无信息泄露面。
+
+---
+
 ## [0.5.0] - 2026-05-09
 
 > **结构性重构** · 仓库改为 pnpm workspace 三段式 + `@aitools` scope 统一命名（REFACTOR-001 PR-1 + PR-2）
