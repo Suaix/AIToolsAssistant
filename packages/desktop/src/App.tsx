@@ -135,9 +135,26 @@ export function App() {
         if (!raw) return;
 
         const parsed = JSON.parse(raw) as
-          | (GuiMigrationOutcome & { persistedAt?: string })
+          | (GuiMigrationOutcome & { persistedAt?: string; backupPath?: string | null })
           | null;
         if (!parsed) return;
+
+        /* FIX-001：陈旧记录校验
+           如果 backupPath 指向的文件已不存在（被 tmp 清理 / 用户删除 / 路径异常），
+           则判定为陈旧记录，静默清理 .last-migration.json 不弹窗。
+           避免向用户展示指向不存在备份的误导性弹窗。 */
+        if (typeof parsed.backupPath === 'string' && parsed.backupPath.length > 0) {
+          const exists = await invoke<boolean>('file_exists_absolute', {
+            path: parsed.backupPath,
+          }).catch(() => false);
+          if (!exists) {
+            await invoke('delete_file_optional', {
+              basePath: home,
+              relativePath: fileRel,
+            }).catch(() => {});
+            return;
+          }
+        }
 
         /* localStorage ack：按 persistedAt 维度去重，避免重复弹窗 */
         const ackedAt = window.localStorage.getItem(ackKey);

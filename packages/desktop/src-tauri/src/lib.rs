@@ -397,6 +397,35 @@ fn delete_file_optional(base_path: String, relative_path: String) -> Result<(), 
     }
 }
 
+/// 检查绝对路径下的文件是否存在（FIX-001）
+///
+/// 用途：GUI 启动时校验 `.last-migration.json` 中记录的 backupPath 是否仍然存在；
+/// 若不存在则判定为陈旧记录，静默清理 `.last-migration.json` 不弹窗。
+///
+/// 设计要点：
+///   - 接受**绝对路径**（不像 read_text_file_optional 走 base_path + relative_path 模式），
+///     因为 backupPath 由 CLI 端写入时即为完整路径
+///   - 严格判定"是文件"（is_file()），目录或符号链接不算
+///   - 不限制 `..` —— 该函数只 stat 不读内容，无信息泄露面
+///
+/// 错误语义：
+///   - 路径存在且是文件 → Ok(true)
+///   - 路径不存在 → Ok(false)
+///   - 路径存在但是目录 → Ok(false)
+///   - 其他 IO 错误 → Err
+#[tauri::command]
+fn file_exists_absolute(path: String) -> Result<bool, String> {
+    if path.is_empty() {
+        return Err("path 不允许为空".to_string());
+    }
+    let p = std::path::Path::new(&path);
+    match p.try_exists() {
+        Ok(true) => Ok(p.is_file()),
+        Ok(false) => Ok(false),
+        Err(err) => Err(format!("检查文件存在性失败: {}", err)),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -419,7 +448,8 @@ pub fn run() {
             ensure_project_config,
             detect_project_tools,
             read_text_file_optional,
-            delete_file_optional
+            delete_file_optional,
+            file_exists_absolute
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
